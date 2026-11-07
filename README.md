@@ -32,6 +32,7 @@ One master/slave pair rotates keys. The master requests keys from its KME, sends
 | 2. Container images | `ghcr.io/equinix-svc/svc-helm-encryptor/{qkd-exchange,strongswan,macsec}:0.1.0`, built by the `images` GitHub Actions workflow on every change under `src/` (or by hand with `scripts/push-images.sh`). Public packages need no credential. Private packages need `REGISTRY_USER` and `REGISTRY_TOKEN`. The images must exist before the first boot. |
 | 3. Day 0 file | [`day0/day0-encryptor-basic.yaml`](day0/day0-encryptor-basic.yaml) for a first test, [`day0/day0-encryptor-advanced.yaml`](day0/day0-encryptor-advanced.yaml) for a real KME. |
 | 4. Parameters | Three required for BASIC, see below. Full list: [Day 0 templates](#3-day-0-templates). Certificates for a real KME are loaded after boot: [section 4](#4-load-kme-certificates-after-boot). |
+| 5. Check | On the node: `curl -fsSL https://raw.githubusercontent.com/equinix-svc/svc-helm-encryptor/main/scripts/check-install.sh \| sudo bash`. It is read-only, prints PASS/FAIL and never prints secrets. |
 
 BASIC, one appliance of each role (the master also runs the KME simulator):
 

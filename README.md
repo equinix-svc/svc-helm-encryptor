@@ -27,7 +27,7 @@ One master/slave pair rotates keys. The master requests keys from its KME, sends
 | Step | What |
 |---|---|
 | 1. VM image | Plain `k3s-node` image (`k3s-node.qcow2`) from [svc-ne-byoi-builder](https://github.com/equinix-svc/svc-ne-byoi-builder). Portal settings: `docs/portal-values.md` in that repo. |
-| 2. Container images | `ghcr.io/equinix-svc/svc-helm-encryptor/{qkd-exchange,strongswan,macsec}:0.1.0`, built by the `images` GitHub Actions workflow on every change under `src/` (or by hand with `scripts/push-images.sh`). The packages must be public. Required before the first boot. |
+| 2. Container images | `ghcr.io/equinix-svc/svc-helm-encryptor/{qkd-exchange,strongswan,macsec}:0.1.0`, built by the `images` GitHub Actions workflow on every change under `src/` (or by hand with `scripts/push-images.sh`). Public packages need no credential. Private packages need `REGISTRY_USER` and `REGISTRY_TOKEN`. The images must exist before the first boot. |
 | 3. Day 0 file | [`day0/day0-encryptor-basic.yaml`](day0/day0-encryptor-basic.yaml) for a first test, [`day0/day0-encryptor-advanced.yaml`](day0/day0-encryptor-advanced.yaml) for a real KME. |
 | 4. Parameters | Three required for BASIC, see below. Full list: [Day 0 templates](#3-day-0-templates). Certificates for a real KME are loaded after boot: [section 4](#4-load-kme-certificates-after-boot). |
 
@@ -74,6 +74,8 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 | `K3S_TLS_SAN` | no | no | empty | `203.0.113.20` | Extra API certificate name or IP. |
 | `STACK_REF` | no | no | `main` | `main` | Repo branch or tag to fetch. Pin a tag for repeatable boots. |
 | `STACK_TOKEN` | no | no | empty | leave empty | Read-only GitHub token, only for a private fork. |
+| `REGISTRY_USER` | no | no | empty | `festrade-equinix` | GitHub login used to pull private images from ghcr.io. Leave empty when the packages are public. |
+| `REGISTRY_TOKEN` | no | no | empty | `ghp_AbCdEf1234567890AbCdEf1234567890AbCd` | Classic personal access token with only `read:packages`. Written to `/etc/rancher/k3s/registries.yaml` (root only) before k3s starts. Expires: set a reminder to rotate it. |
 
 BASIC uses plain HTTP for the KME and the peer API. ADVANCED does too when `KME_URL` is `http://`. Its simulator gives random keys, **not QKD**, with no authentication.
 
@@ -122,7 +124,7 @@ To rotate them, update the Secret (`... --dry-run=client -o yaml | sudo k3s kube
 - **Untested:** a real KME (certificate and SAE ID mapping vary by vendor) and deployment on k3s.
 - **IKE authentication:** it uses a shared secret (`IKE_PSK`) for now. Certificates would be better for production.
 - **Day 0 size:** the templates are about 14 KB, under the portal limit of 20,000 characters. No certificate goes through Day 0.
-- **Secrets in Day 0:** the Day 0 files hold no secret. `IKE_PSK` (and `K3S_TOKEN` for an agent) still travel as portal parameters and end up in a Kubernetes Secret on the node, readable by root.
+- **Secrets in Day 0:** the Day 0 files hold no secret. `IKE_PSK` (and `K3S_TOKEN` for an agent, `REGISTRY_TOKEN` for private images) still travel as portal parameters and end up in a Kubernetes Secret on the node, readable by root.
 - **Images:** `encryptor.yaml` pulls `ghcr.io/equinix-svc/svc-helm-encryptor/{qkd-exchange,strongswan,macsec}:0.1.0`. Build them from `src/<name>/` and push them to that registry (or change the names in `encryptor.yaml.in`) before the first boot. A private registry needs a pull secret.
 
 ## 7. Build and validate

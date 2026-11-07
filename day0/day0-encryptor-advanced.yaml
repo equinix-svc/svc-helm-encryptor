@@ -14,6 +14,7 @@
 #     LOCAL_TS REMOTE_TS   protected subnets, e.g. 10.1.0.0/24 and 10.2.0.0/24
 #     MACSEC_IFACE  host NIC to protect with MACsec, e.g. ens4 (empty = no MACsec)
 #     MACSEC_ADDR   optional CIDR to put on the macsec interface, e.g. 10.99.0.1/24
+#     REGISTRY_USER REGISTRY_TOKEN  GitHub login and read:packages token to pull PRIVATE images from ghcr.io (optional)
 #     STACK_REF STACK_TOKEN   branch/tag of this repo to fetch (default main); token only for a private fork
 # On a single node or the first server, once k3s is Ready, it creates Secret site-secrets and ConfigMap site in
 # namespace encryptor and downloads encryptor.yaml into the k3s manifests directory.
@@ -77,6 +78,8 @@ write_files:
       MACSEC_ADDR='[(${MACSEC_ADDR})]'
       STACK_REF='[(${STACK_REF})]'
       STACK_TOKEN='[(${STACK_TOKEN})]'
+      REGISTRY_USER='[(${REGISTRY_USER})]'
+      REGISTRY_TOKEN='[(${REGISTRY_TOKEN})]'
 
   - path: /usr/local/bin/day0-encryptor.sh
     owner: root:root
@@ -264,6 +267,19 @@ write_files:
           UNIT=k3s-agent ;;
         *) echo "unknown K3S_ROLE: $ROLE"; exit 1 ;;
       esac
+
+      # Private container images on ghcr.io: pull credentials for containerd (k3s reads this file at start)
+      if [ -n "$REGISTRY_TOKEN" ]; then
+        ( umask 077; cat > /etc/rancher/k3s/registries.yaml <<EOF
+      configs:
+        "ghcr.io":
+          auth:
+            username: "$REGISTRY_USER"
+            password: "$REGISTRY_TOKEN"
+      EOF
+        )
+        echo "registry credentials for ghcr.io written"
+      fi
 
       systemctl daemon-reload
       systemctl enable --now "$UNIT"

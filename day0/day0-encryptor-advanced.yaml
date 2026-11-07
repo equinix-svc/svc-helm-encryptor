@@ -15,7 +15,7 @@
 #     LOCAL_ADDR    this appliance's own IP towards the peer (IKE source, peer API bind); default: address of the default route  (optional)
 #     MACSEC_IFACE  host NIC to protect with MACsec, e.g. ens4 (empty = no MACsec)
 #     MACSEC_ADDR   optional CIDR to put on the macsec interface, e.g. 10.99.0.1/24
-#     REGISTRY_USER REGISTRY_TOKEN  GitHub login and read:packages token to pull PRIVATE images from ghcr.io (optional)
+#     REGISTRY_USER REGISTRY_TOKEN  GitHub login and read:packages token to pull the private images from ghcr.io  (required)
 #     STACK_REF STACK_TOKEN   branch/tag of this repo to fetch (default main); token only for a private fork
 # On a single node or the first server, once k3s is Ready, it creates Secret site-secrets and ConfigMap site in
 # namespace encryptor and downloads encryptor.yaml into the k3s manifests directory.
@@ -94,7 +94,7 @@ write_files:
       MAN=/var/lib/rancher/k3s/server/manifests
       REF="${STACK_REF:-main}"
       NS=encryptor
-      for v in SAE_ID PEER_SAE_ID QKD_ROLE KME_URL PEER_ADDR IKE_PSK; do
+      for v in SAE_ID PEER_SAE_ID QKD_ROLE KME_URL PEER_ADDR IKE_PSK REGISTRY_USER REGISTRY_TOKEN; do
         [ -n "${!v:-}" ] || { echo "missing required parameter $v"; exit 1; }
       done
       case "$QKD_ROLE" in master) PEER_ROLE=slave ;; slave) PEER_ROLE=master ;; *) echo "QKD_ROLE must be master|slave"; exit 1 ;; esac
@@ -283,7 +283,7 @@ write_files:
         )
         echo "registry credentials for ghcr.io written"
       else
-        echo "WARNING: REGISTRY_TOKEN is empty: the container images on ghcr.io must be public, otherwise the encryptor Pod cannot pull them"
+        echo "WARNING: REGISTRY_TOKEN is empty: the encryptor install will stop (registry credentials are required)"
       fi
 
       systemctl daemon-reload
@@ -309,7 +309,7 @@ write_files:
       if [ "$UNIT" = k3s ] && [ -z "$K3S_SERVER_URL" ]; then
         echo "installing the encryptor stack"
         SAE_ID="$SAE_ID" PEER_SAE_ID="$PEER_SAE_ID" QKD_ROLE="$QKD_ROLE" KME_URL="$KME_URL" PEER_ADDR="$PEER_ADDR" \
-        IKE_PSK="$IKE_PSK" LOCAL_ADDR="$LOCAL_ADDR" \
+        IKE_PSK="$IKE_PSK" LOCAL_ADDR="$LOCAL_ADDR" REGISTRY_USER="$REGISTRY_USER" REGISTRY_TOKEN="$REGISTRY_TOKEN" \
         LOCAL_TS="$LOCAL_TS" REMOTE_TS="$REMOTE_TS" MACSEC_IFACE="$MACSEC_IFACE" MACSEC_ADDR="$MACSEC_ADDR" \
         STACK_REF="$STACK_REF" STACK_TOKEN="$STACK_TOKEN" /usr/local/bin/day0-encryptor.sh \
           || echo "encryptor install failed: see this log"

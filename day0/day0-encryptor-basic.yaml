@@ -14,7 +14,7 @@
 #     MACSEC_IFACE  host NIC for MACsec, e.g. ens4 (empty = no MACsec)  (optional)
 #     MACSEC_ADDR   CIDR on the macsec interface, e.g. 10.99.0.1/24      (optional)
 #     LOCAL_TS REMOTE_TS  protected subnets (default 0.0.0.0/0)          (optional)
-#     REGISTRY_USER REGISTRY_TOKEN  GitHub login and read:packages token to pull PRIVATE images from ghcr.io (optional)
+#     REGISTRY_USER REGISTRY_TOKEN  GitHub login and read:packages token to pull the private images from ghcr.io  (required)
 #     STACK_REF STACK_TOKEN  repo branch/tag (default main), token only for a private fork (optional)
 # Equinix injects a STATIC address (no DHCP), so this file configures the network itself.
 # Roles (K3S_ROLE): single | server | agent  (the encryptor is only installed on single / first server)
@@ -88,7 +88,7 @@ write_files:
       MAN=/var/lib/rancher/k3s/server/manifests
       REF="${STACK_REF:-main}"
       NS=encryptor
-      for v in QKD_ROLE PEER_ADDR IKE_PSK; do
+      for v in QKD_ROLE PEER_ADDR IKE_PSK REGISTRY_USER REGISTRY_TOKEN; do
         [ -n "${!v:-}" ] || { echo "missing required parameter $v"; exit 1; }
       done
       # BASIC defaults: fixed SAE IDs, KME simulator on the master
@@ -279,7 +279,7 @@ write_files:
         )
         echo "registry credentials for ghcr.io written"
       else
-        echo "WARNING: REGISTRY_TOKEN is empty: the container images on ghcr.io must be public, otherwise the encryptor Pod cannot pull them"
+        echo "WARNING: REGISTRY_TOKEN is empty: the encryptor install will stop (registry credentials are required)"
       fi
 
       systemctl daemon-reload
@@ -304,7 +304,7 @@ write_files:
       # Encryptor stack: single node or first server only
       if [ "$UNIT" = k3s ] && [ -z "$K3S_SERVER_URL" ]; then
         echo "installing the encryptor stack"
-        QKD_ROLE="$QKD_ROLE" PEER_ADDR="$PEER_ADDR" IKE_PSK="$IKE_PSK" LOCAL_ADDR="$LOCAL_ADDR" \
+        QKD_ROLE="$QKD_ROLE" PEER_ADDR="$PEER_ADDR" IKE_PSK="$IKE_PSK" LOCAL_ADDR="$LOCAL_ADDR" REGISTRY_USER="$REGISTRY_USER" REGISTRY_TOKEN="$REGISTRY_TOKEN" \
         LOCAL_TS="$LOCAL_TS" REMOTE_TS="$REMOTE_TS" MACSEC_IFACE="$MACSEC_IFACE" MACSEC_ADDR="$MACSEC_ADDR" \
         STACK_REF="$STACK_REF" STACK_TOKEN="$STACK_TOKEN" /usr/local/bin/day0-encryptor.sh \
           || echo "encryptor install failed: see this log"

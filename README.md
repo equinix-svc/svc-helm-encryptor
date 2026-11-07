@@ -29,9 +29,9 @@ One master/slave pair rotates keys. The master requests keys from its KME, sends
 | Step | What |
 |---|---|
 | 1. VM image | Plain `k3s-node` image (`k3s-node.qcow2`) from [svc-ne-byoi-builder](https://github.com/equinix-svc/svc-ne-byoi-builder). Portal settings: `docs/portal-values.md` in that repo. |
-| 2. Container images | `ghcr.io/equinix-svc/svc-helm-encryptor/{qkd-exchange,strongswan,macsec}:0.1.0`, built by the `images` GitHub Actions workflow on every change under `src/` (or by hand with `scripts/push-images.sh`). Public packages need no credential. Private packages need `REGISTRY_USER` and `REGISTRY_TOKEN`. The images must exist before the first boot. |
+| 2. Container images | `ghcr.io/equinix-svc/svc-helm-encryptor/{qkd-exchange,strongswan,macsec}:0.1.0`, built by the `images` GitHub Actions workflow on every change under `src/` (or by hand with `scripts/push-images.sh`). The packages are private: the node pulls them with `REGISTRY_USER` and `REGISTRY_TOKEN` (required). The images must exist before the first boot. |
 | 3. Day 0 file | [`day0/day0-encryptor-basic.yaml`](day0/day0-encryptor-basic.yaml) for a first test, [`day0/day0-encryptor-advanced.yaml`](day0/day0-encryptor-advanced.yaml) for a real KME. |
-| 4. Parameters | Three required for BASIC, see below. Full list: [Day 0 templates](#3-day-0-templates). Certificates for a real KME are loaded after boot: [section 4](#4-load-kme-certificates-after-boot). |
+| 4. Parameters | Five required for BASIC, see below. Full list: [Day 0 templates](#3-day-0-templates). Certificates for a real KME are loaded after boot: [section 4](#4-load-kme-certificates-after-boot). |
 | 5. Check | On the node: `curl -fsSL https://raw.githubusercontent.com/equinix-svc/svc-helm-encryptor/main/scripts/check-install.sh \| sudo bash`. It is read-only, prints PASS/FAIL and never prints secrets. |
 
 BASIC, one appliance of each role (the master also runs the KME simulator):
@@ -41,6 +41,8 @@ BASIC, one appliance of each role (the master also runs the KME simulator):
 | `QKD_ROLE` | `master` | `slave` |
 | `PEER_ADDR` | the slave's IP, e.g. `172.16.0.12` | the master's IP, e.g. `172.16.0.11` |
 | `IKE_PSK` | the same secret, e.g. `openssl rand -hex 16` | the same secret |
+| `REGISTRY_USER` | your GitHub login | your GitHub login |
+| `REGISTRY_TOKEN` | a `read:packages` token (the same on both) | the same token |
 
 Optional: `LOCAL_ADDR` (this appliance's own IP towards the peer, e.g. `172.16.0.11`; needed when the peer is reached over a second interface), `MACSEC_IFACE` (e.g. `ens4`) and `LOCAL_TS` / `REMOTE_TS` (e.g. `10.1.0.0/24` / `10.2.0.0/24`). ACL: allow 22, UDP 500/4500, ESP, TCP 8443 and 8444 from the peer.
 
@@ -50,8 +52,8 @@ Two templates, same structure. Both do what the k3s-node image's own Day 0 does,
 
 | Template | Use | Required parameters |
 |---|---|---|
-| [`day0/day0-encryptor-basic.yaml`](day0/day0-encryptor-basic.yaml) | **BASIC** (lab): bring up a pair quickly with the KME simulator | 3, the rest optional |
-| [`day0/day0-encryptor-advanced.yaml`](day0/day0-encryptor-advanced.yaml) | **ADVANCED**: real KME, per-site values | 6, the rest optional |
+| [`day0/day0-encryptor-basic.yaml`](day0/day0-encryptor-basic.yaml) | **BASIC** (lab): bring up a pair quickly with the KME simulator | 5, the rest optional |
+| [`day0/day0-encryptor-advanced.yaml`](day0/day0-encryptor-advanced.yaml) | **ADVANCED**: real KME, per-site values | 8, the rest optional |
 
 Equinix predefined (both): `hostname` `userName` `publicKey` `adminPwd` `ipAddressWithCidr` `gateway`. Declare every other variable as a custom parameter in the portal.
 
@@ -78,8 +80,8 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 | `K3S_TLS_SAN` | no | no | empty | `172.16.0.11` | Extra name or IP in the k3s API server certificate, for `kubectl` or agents reaching port 6443 from outside. Not needed for local `sudo k3s kubectl`. |
 | `STACK_REF` | no | no | `main` | `main` | Repo branch or tag to fetch. Pin a tag for repeatable boots. |
 | `STACK_TOKEN` | no | no | empty | leave empty | Read-only GitHub token, only for a private fork. |
-| `REGISTRY_USER` | yes, while the images are private | yes, while the images are private | empty | `my-github-user` | GitHub login used to pull private images from ghcr.io. Leave empty only when the packages are public; Day 0 logs a warning when it is empty. |
-| `REGISTRY_TOKEN` | yes, while the images are private | yes, while the images are private | empty | `ghp_AbCdEf1234567890AbCdEf1234567890AbCd` | Classic personal access token with only `read:packages`. Written to `/etc/rancher/k3s/registries.yaml` (root only) before k3s starts. Expires: set a reminder to rotate it. |
+| `REGISTRY_USER` | yes | yes | - | `my-github-user` | GitHub login used to pull the private images from ghcr.io. Day 0 stops the encryptor install without it. |
+| `REGISTRY_TOKEN` | yes | yes | - | `ghp_AbCdEf1234567890AbCdEf1234567890AbCd` | Classic personal access token with only `read:packages`. Written to `/etc/rancher/k3s/registries.yaml` (root only) before k3s starts. Expires: set a reminder to rotate it. |
 
 BASIC uses plain HTTP for the KME and the peer API. ADVANCED does too when `KME_URL` is `http://`. Its simulator gives random keys, **not QKD**, with no authentication.
 
@@ -128,7 +130,7 @@ To rotate them, update the Secret (`... --dry-run=client -o yaml | sudo k3s kube
 - **Untested:** a real KME (certificate and SAE ID mapping vary by vendor) and deployment on k3s.
 - **IKE authentication:** it uses a shared secret (`IKE_PSK`) for now. Certificates would be better for production.
 - **Day 0 size:** the templates are about 14 KB, under the portal limit of 20,000 characters. No certificate goes through Day 0.
-- **Secrets in Day 0:** the Day 0 files hold no secret. `IKE_PSK` (and `K3S_TOKEN` for an agent, `REGISTRY_TOKEN` for private images) still travel as portal parameters and end up in a Kubernetes Secret on the node, readable by root.
+- **Secrets in Day 0:** the Day 0 files hold no secret. `IKE_PSK` (and `K3S_TOKEN` for an agent, `REGISTRY_TOKEN`) still travel as portal parameters and end up in a Kubernetes Secret on the node, readable by root.
 - **Images:** `encryptor.yaml` pulls `ghcr.io/equinix-svc/svc-helm-encryptor/{qkd-exchange,strongswan,macsec}:0.1.0`. Build them from `src/<name>/` and push them to that registry (or change the names in `encryptor.yaml.in`) before the first boot. A private registry needs a pull secret.
 
 ## 7. Build and validate

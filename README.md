@@ -72,7 +72,7 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 | `K3S_ROLE` | no | no | `single` | `single` | `single`: standalone node. `server`: control-plane node. `agent`: k3s worker node that joins an existing cluster; the encryptor is not installed on it. |
 | `K3S_SERVER_URL` | no (agent only) | no (agent only) | empty | `https://10.0.0.5:6443` | URL used by an agent to join the k3s cluster. Empty for `single` or the first `server`. |
 | `K3S_TOKEN` | no (agent only) | no (agent only) | empty | `K10abc123def456::server:789xyz` | Secret used to join the k3s cluster. |
-| `K3S_TLS_SAN` | no | no | empty | `172.16.0.11` | Extra API certificate name or IP. |
+| `K3S_TLS_SAN` | no | no | empty | `172.16.0.11` | Extra name or IP in the k3s API server certificate, for `kubectl` or agents reaching port 6443 from outside. Not needed for local `sudo k3s kubectl`. |
 | `STACK_REF` | no | no | `main` | `main` | Repo branch or tag to fetch. Pin a tag for repeatable boots. |
 | `STACK_TOKEN` | no | no | empty | leave empty | Read-only GitHub token, only for a private fork. |
 | `REGISTRY_USER` | no | no | empty | `my-github-user` | GitHub login used to pull private images from ghcr.io. Leave empty when the packages are public. |

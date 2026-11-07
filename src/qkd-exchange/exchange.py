@@ -205,7 +205,7 @@ def serve_peer(ex):
                 log.error("peer %s failed: %s", self.path, e)
                 self._send(400, {"error": str(e)})
 
-    srv = ThreadingHTTPServer(("0.0.0.0", cfg.get("listen", 8444)), H)
+    srv = ThreadingHTTPServer((cfg.get("bind", "0.0.0.0"), cfg.get("listen", 8444)), H)
     if cfg.get("cert"):
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(cfg["cert"], cfg["key"])

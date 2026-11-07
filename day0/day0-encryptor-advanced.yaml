@@ -12,6 +12,7 @@
 #     PEER_ADDR     remote appliance IP (IKE, peer API on 8444)        (required)
 #     IKE_PSK       IKEv2 authentication secret, identical on both ends (required)
 #     LOCAL_TS REMOTE_TS   protected subnets, e.g. 10.1.0.0/24 and 10.2.0.0/24
+#     LOCAL_ADDR    this appliance's own IP towards the peer (IKE source, peer API bind); default: address of the default route  (optional)
 #     MACSEC_IFACE  host NIC to protect with MACsec, e.g. ens4 (empty = no MACsec)
 #     MACSEC_ADDR   optional CIDR to put on the macsec interface, e.g. 10.99.0.1/24
 #     REGISTRY_USER REGISTRY_TOKEN  GitHub login and read:packages token to pull PRIVATE images from ghcr.io (optional)
@@ -76,6 +77,7 @@ write_files:
       REMOTE_TS='[(${REMOTE_TS})]'
       MACSEC_IFACE='[(${MACSEC_IFACE})]'
       MACSEC_ADDR='[(${MACSEC_ADDR})]'
+      LOCAL_ADDR='[(${LOCAL_ADDR})]'
       STACK_REF='[(${STACK_REF})]'
       STACK_TOKEN='[(${STACK_TOKEN})]'
       REGISTRY_USER='[(${REGISTRY_USER})]'
@@ -96,7 +98,8 @@ write_files:
         [ -n "${!v:-}" ] || { echo "missing required parameter $v"; exit 1; }
       done
       case "$QKD_ROLE" in master) PEER_ROLE=slave ;; slave) PEER_ROLE=master ;; *) echo "QKD_ROLE must be master|slave"; exit 1 ;; esac
-      NODE_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')"
+      NODE_IP="${LOCAL_ADDR:-$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')}"
+      BIND=""; [ -n "${LOCAL_ADDR:-}" ] && BIND=',"bind":"'"$LOCAL_ADDR"'"'
 
       W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
       # https:// KME = mutual TLS. The certificates are NOT passed through Day 0: load them after boot into Secret kme-tls
@@ -111,7 +114,7 @@ write_files:
       cat > "$W/config.json" <<EOF
       {"sae_id":"$SAE_ID",
        "kme":{"url":"$KME_URL",$TLSJ},
-       "peer":{"url":"$SCHEME://$PEER_ADDR:8444","listen":8444,$TLSJ},
+       "peer":{"url":"$SCHEME://$PEER_ADDR:8444","listen":8444$BIND,$TLSJ},
        "consumers":[
         {"name":"s2s","type":"ipsec","peer_sae":"$PEER_SAE_ID","role":"$QKD_ROLE","interval":$INT,"dir":"/swanctl/conf.d"},
         {"name":"macsec","type":"macsec","peer_sae":"$PEER_SAE_ID","role":"$QKD_ROLE","interval":86400,"dir":"/macsec"},
@@ -304,7 +307,7 @@ write_files:
       if [ "$UNIT" = k3s ] && [ -z "$K3S_SERVER_URL" ]; then
         echo "installing the encryptor stack"
         SAE_ID="$SAE_ID" PEER_SAE_ID="$PEER_SAE_ID" QKD_ROLE="$QKD_ROLE" KME_URL="$KME_URL" PEER_ADDR="$PEER_ADDR" \
-        IKE_PSK="$IKE_PSK" \
+        IKE_PSK="$IKE_PSK" LOCAL_ADDR="$LOCAL_ADDR" \
         LOCAL_TS="$LOCAL_TS" REMOTE_TS="$REMOTE_TS" MACSEC_IFACE="$MACSEC_IFACE" MACSEC_ADDR="$MACSEC_ADDR" \
         STACK_REF="$STACK_REF" STACK_TOKEN="$STACK_TOKEN" /usr/local/bin/day0-encryptor.sh \
           || echo "encryptor install failed: see this log"

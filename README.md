@@ -36,10 +36,10 @@ BASIC, one appliance of each role (the master also runs the KME simulator):
 | Parameter | Master | Slave |
 |---|---|---|
 | `QKD_ROLE` | `master` | `slave` |
-| `PEER_ADDR` | the slave's IP | the master's IP |
+| `PEER_ADDR` | the slave's IP, e.g. `172.16.0.12` | the master's IP, e.g. `172.16.0.11` |
 | `IKE_PSK` | the same secret, e.g. `openssl rand -hex 16` | the same secret |
 
-Optional: `MACSEC_IFACE` (e.g. `ens4`) and `LOCAL_TS` / `REMOTE_TS` (e.g. `10.1.0.0/24` / `10.2.0.0/24`). ACL: allow 22, UDP 500/4500, ESP, TCP 8443 and 8444 from the peer.
+Optional: `LOCAL_ADDR` (this appliance's own IP towards the peer, e.g. `172.16.0.11`; needed when the peer is reached over a second interface), `MACSEC_IFACE` (e.g. `ens4`) and `LOCAL_TS` / `REMOTE_TS` (e.g. `10.1.0.0/24` / `10.2.0.0/24`). ACL: allow 22, UDP 500/4500, ESP, TCP 8443 and 8444 from the peer.
 
 ## 3. Day 0 templates
 
@@ -59,10 +59,11 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 | Parameter | BASIC | ADVANCED | Default | Example (paste in the portal) | Meaning |
 |---|---|---|---|---|---|
 | `QKD_ROLE` | yes | yes | - | `master` | `master` (calls `enc_keys`, initiates IPsec) or `slave` (calls `dec_keys`). In BASIC, the master is SAE-A and also runs the KME simulator; the slave is SAE-B. |
-| `PEER_ADDR` | yes | yes | - | `10.0.0.12` | The other appliance's address, used for IKE and the peer API on 8444. Any address reachable from this appliance works, a private one included. With mutual TLS (ADVANCED) it must match a name or IP in the peer certificate. |
+| `PEER_ADDR` | yes | yes | - | `172.16.0.12` | The other appliance's address, used for IKE and the peer API on 8444. Any address reachable from this appliance works, a private one included. With mutual TLS (ADVANCED) it must match a name or IP in the peer certificate. |
+| `LOCAL_ADDR` | no | no | address of the default route | `172.16.0.11` | This appliance's own IP towards the peer. It is the IKE source address and the only address the peer API listens on. Set it when the peer is reached over a second interface or subnet. |
 | `SAE_ID` | - | yes | - | `SAE-A` | This appliance's SAE ID on its KME. BASIC fixes it to `SAE-A` (master) or `SAE-B` (slave). |
 | `PEER_SAE_ID` | - | yes | - | `SAE-B` | The remote appliance's SAE ID. BASIC fixes it to the opposite of the local one. |
-| `KME_URL` | - | yes | - | `https://kme.example.net:8443` | ETSI GS QKD 014 base URL. `https://` means mutual TLS: the certificates are loaded after boot (section 4), and the host in the URL (name or IP) must be in the KME certificate. BASIC uses `http://127.0.0.1:8443` on the master and `http://<PEER_ADDR>:8443` on the slave. |
+| `KME_URL` | - | yes | - | `https://172.16.1.5:8443` | ETSI GS QKD 014 address of this site's KME, the QKD device (not the other encryptor). Any subnet reachable from the appliance works. `https://` means mutual TLS: the certificates are loaded after boot (section 4), and the host in the URL (name or IP) must be in the KME certificate. BASIC sets it itself: `http://127.0.0.1:8443` on the master and `http://<PEER_ADDR>:8443` on the slave. |
 | `IKE_PSK` | yes | yes | - | `4f9c2a7e1b8d3c6a5e0f9b2d7c4a1e83` | IKEv2 secret, identical on both ends, never stored in the repo. The IPsec tunnel is always configured, so both templates refuse to start without it. Generate with `openssl rand -hex 16`. |
 | `LOCAL_TS` | no | no | `0.0.0.0/0` | `10.1.0.0/24` | Local protected subnet. |
 | `REMOTE_TS` | no | no | `0.0.0.0/0` | `10.2.0.0/24` | Remote protected subnet. |
@@ -71,7 +72,7 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 | `K3S_ROLE` | no | no | `single` | `single` | `single`: standalone node. `server`: control-plane node. `agent`: k3s worker node that joins an existing cluster; the encryptor is not installed on it. |
 | `K3S_SERVER_URL` | no (agent only) | no (agent only) | empty | `https://10.0.0.5:6443` | URL used by an agent to join the k3s cluster. Empty for `single` or the first `server`. |
 | `K3S_TOKEN` | no (agent only) | no (agent only) | empty | `K10abc123def456::server:789xyz` | Secret used to join the k3s cluster. |
-| `K3S_TLS_SAN` | no | no | empty | `10.0.0.11` | Extra API certificate name or IP. |
+| `K3S_TLS_SAN` | no | no | empty | `172.16.0.11` | Extra API certificate name or IP. |
 | `STACK_REF` | no | no | `main` | `main` | Repo branch or tag to fetch. Pin a tag for repeatable boots. |
 | `STACK_TOKEN` | no | no | empty | leave empty | Read-only GitHub token, only for a private fork. |
 | `REGISTRY_USER` | no | no | empty | `my-github-user` | GitHub login used to pull private images from ghcr.io. Leave empty when the packages are public. |

@@ -1,0 +1,307 @@
+#cloud-config
+# FIRST LIGHT Day 0 (lab): the smallest set of portal parameters to bring up a pair of QKD encryptors for testing.
+# Same template family as day0-encryptor.yaml (full parameters), with defaults instead of per-site values:
+#   - SAE IDs are fixed: master = SAE-A, slave = SAE-B
+#   - the KME is the ETSI 014 SIMULATOR (random keys, NOT QKD), run on the master node; the slave points at it
+#   - no certificates: KME and peer API use plain HTTP, so restrict TCP 8443 and 8444 in the ACL to the peer only
+#   - IKE_PSK defaults to a public lab value
+# Placeholders use the Equinix inline syntax (case-sensitive names).
+#   Equinix predefined: hostname userName publicKey adminPwd ipAddressWithCidr gateway
+#   Custom parameters : K3S_ROLE K3S_SERVER_URL K3S_TOKEN K3S_TLS_SAN   (as the k3s-node image, all optional)
+#     QKD_ROLE      master | slave                                       (required)
+#     PEER_ADDR     the other appliance's IP                             (required)
+#     MACSEC_IFACE  host NIC for MACsec, e.g. ens4 (empty = no MACsec)  (optional)
+#     MACSEC_ADDR   CIDR on the macsec interface, e.g. 10.99.0.1/24      (optional)
+#     LOCAL_TS REMOTE_TS  protected subnets (default 0.0.0.0/0)          (optional)
+#     IKE_PSK       IKEv2 secret, identical on both ends                 (optional, lab default)
+#     STACK_REF STACK_TOKEN  repo branch/tag (default main), token only for a private fork (optional)
+# Equinix injects a STATIC address (no DHCP), so this file configures the network itself.
+# Roles (K3S_ROLE): single | server | agent  (the encryptor is only installed on single / first server)
+
+hostname: [(${hostname})]
+manage_etc_hosts: true
+preserve_hostname: false
+
+# The user is created by the bootstrap script below; an empty list stops cloud-init adding its default user.
+users: []
+
+ssh_pwauth: false
+
+ntp:
+  enabled: true
+  ntp_client: chrony
+  servers:
+    - 0.pool.ntp.org
+    - 1.pool.ntp.org
+
+write_files:
+  # Static network (systemd-networkd). Sorts before cloud-init's generated DHCP file, so it wins.
+  # Interface name ens3 is what Equinix uses in its own Debian/Ubuntu example.
+  - path: /etc/systemd/network/05-equinix.network
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Match]
+      Name=ens3
+
+      [Network]
+      Address=[(${ipAddressWithCidr})]
+      Gateway=[(${gateway})]
+      DNS=8.8.8.8
+      DNS=8.8.4.4
+
+  - path: /etc/day0/params.env
+    owner: root:root
+    permissions: "0600"
+    content: |
+      USER_NAME='[(${userName})]'
+      PUBLIC_KEY='[(${publicKey})]'
+      ADMIN_PWD='[(${adminPwd})]'
+      ADMIN_PASSWORD='[(${adminPassword})]'
+      K3S_ROLE='[(${K3S_ROLE})]'
+      K3S_SERVER_URL='[(${K3S_SERVER_URL})]'
+      K3S_TOKEN='[(${K3S_TOKEN})]'
+      K3S_TLS_SAN='[(${K3S_TLS_SAN})]'
+
+      QKD_ROLE='[(${QKD_ROLE})]'
+      PEER_ADDR='[(${PEER_ADDR})]'
+      IKE_PSK='[(${IKE_PSK})]'
+      LOCAL_TS='[(${LOCAL_TS})]'
+      REMOTE_TS='[(${REMOTE_TS})]'
+      MACSEC_IFACE='[(${MACSEC_IFACE})]'
+      MACSEC_ADDR='[(${MACSEC_ADDR})]'
+      STACK_REF='[(${STACK_REF})]'
+      STACK_TOKEN='[(${STACK_TOKEN})]'
+
+  - path: /usr/local/bin/day0-encryptor.sh
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      # Called by day0-bootstrap.sh with the QKD/site parameters in the environment.
+      set -euo pipefail
+      K="/usr/local/bin/k3s kubectl"
+      MAN=/var/lib/rancher/k3s/server/manifests
+      REF="${STACK_REF:-main}"
+      NS=encryptor
+      for v in QKD_ROLE PEER_ADDR; do
+        [ -n "${!v:-}" ] || { echo "missing required parameter $v"; exit 1; }
+      done
+      # first-light defaults: fixed SAE IDs, KME simulator on the master
+      INSTALL_KME_SIM=no
+      case "$QKD_ROLE" in
+        master) SAE_ID=SAE-A; PEER_SAE_ID=SAE-B; KME_URL=http://127.0.0.1:8443; INSTALL_KME_SIM=yes ;;
+        slave)  SAE_ID=SAE-B; PEER_SAE_ID=SAE-A; KME_URL="http://$PEER_ADDR:8443" ;;
+        *) echo "QKD_ROLE must be master|slave"; exit 1 ;;
+      esac
+      IKE_PSK="${IKE_PSK:-lab-only-first-light-psk}"
+      KME_CA_B64=""; KME_CERT_B64=""; KME_KEY_B64=""
+      NODE_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')"
+
+      W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
+      for f in CA CERT KEY; do v="KME_${f}_B64"; [ -n "${!v:-}" ] && printf '%s' "${!v}" | base64 -d > "$W/$f.pem"; done
+      TLSJ='"ca":"/etc/qkd/tls/ca.crt","cert":"/etc/qkd/tls/tls.crt","key":"/etc/qkd/tls/tls.key"'
+      SCHEME=https
+      [ -s "$W/CA.pem" ] || { TLSJ='"ca":null'; SCHEME=http; echo "no certificates: KME and peer API use plain HTTP (lab only)"; }
+
+      # --- agent config: three consumers, same role on all of them
+      INT=3600
+      cat > "$W/config.json" <<EOF
+      {"sae_id":"$SAE_ID",
+       "kme":{"url":"$KME_URL",$TLSJ},
+       "peer":{"url":"$SCHEME://$PEER_ADDR:8444","listen":8444,$TLSJ},
+       "consumers":[
+        {"name":"s2s","type":"ipsec","peer_sae":"$PEER_SAE_ID","role":"$QKD_ROLE","interval":$INT,"dir":"/swanctl/conf.d"},
+        {"name":"macsec","type":"macsec","peer_sae":"$PEER_SAE_ID","role":"$QKD_ROLE","interval":86400,"dir":"/macsec"},
+        {"name":"ssh","type":"ssh","peer_sae":"$PEER_SAE_ID","role":"$QKD_ROLE","interval":86400,"dir":"/ssh"}]}
+      EOF
+
+      # --- macsec settings read by the macsec container
+      printf 'MACSEC_IFACE=%s\nMACSEC_ADDR=%s\n' "${MACSEC_IFACE:-}" "${MACSEC_ADDR:-}" > "$W/macsec.env"
+
+      # --- swanctl: IKEv2 + PPK required (no silent downgrade to a non-QKD tunnel)
+      START=none; [ "$QKD_ROLE" = master ] && START=start
+      cat > "$W/swanctl.conf" <<EOF
+      include conf.d/*.conf
+      connections {
+        s2s {
+          version = 2
+          local_addrs = $NODE_IP
+          remote_addrs = $PEER_ADDR
+          proposals = aes256gcm16-prfsha384-x25519
+          reauth_time = 1h
+          keyingtries = 0
+          ppk_id = qkd-s2s
+          ppk_required = yes
+          local { auth = psk; id = $SAE_ID }
+          remote { auth = psk; id = $PEER_SAE_ID }
+          children {
+            s2s {
+              local_ts = ${LOCAL_TS:-0.0.0.0/0}
+              remote_ts = ${REMOTE_TS:-0.0.0.0/0}
+              esp_proposals = aes256gcm16-x25519
+              rekey_time = 30m
+              start_action = $START
+            }
+          }
+        }
+      }
+      secrets {
+        ike-peer {
+          id-1 = $SAE_ID
+          id-2 = $PEER_SAE_ID
+          secret = "${IKE_PSK:-}"
+        }
+      }
+      EOF
+
+      $K create namespace $NS --dry-run=client -o yaml | $K apply -f -
+      $K -n $NS create configmap site --from-file=config.json="$W/config.json" --from-file=macsec.env="$W/macsec.env" \
+        --dry-run=client -o yaml | $K apply -f -
+      ARGS=(--from-file=swanctl.conf="$W/swanctl.conf")
+      [ -s "$W/CA.pem" ] && ARGS+=(--from-file=ca.crt="$W/CA.pem" --from-file=tls.crt="$W/CERT.pem" --from-file=tls.key="$W/KEY.pem")
+      $K -n $NS create secret generic site-secrets "${ARGS[@]}" --dry-run=client -o yaml | $K apply -f -
+
+      AUTH=()
+      [ -n "${STACK_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $STACK_TOKEN")
+      fetch() {   # fetch <file in repo>
+        for i in 1 2 3 4 5 6; do
+          curl -fsSL --retry 3 "${AUTH[@]}" -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/$1?ref=$REF" -o "$MAN/$1" && break
+          echo "download of $1 failed (try $i), retrying"; sleep 20
+        done
+        [ -s "$MAN/$1" ] || { echo "could not download $1"; exit 1; }
+        echo "$1 installed in $MAN (ref $REF)"
+      }
+      EXTRA=""; [ "${INSTALL_KME_SIM:-}" = yes ] && EXTRA=dev-kme-sim.yaml
+      for f in encryptor.yaml $EXTRA; do fetch "$f"; done
+
+  - path: /usr/local/bin/day0-bootstrap.sh
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      # First-boot k3s bootstrap. Idempotent: does nothing once /var/log/day0-done exists.
+      set -euo pipefail
+      exec >>/var/log/day0.log 2>&1
+      echo "[$(date -Is)] day0-bootstrap start"
+
+      [ -e /var/log/day0-done ] && { echo "already done"; exit 0; }
+      . /etc/day0/params.env
+
+      echo "network at start:"; ip -br a; ip r
+
+      # User: the portal user (userName). The key comes from publicKey (may lack the key
+      # type); the portal password hash is set on the user.
+      norm_key() {
+        case "$1" in
+          ssh-*|ecdsa-*|sk-*)    echo "$1" ;;
+          AAAAB3NzaC1yc2*)       echo "ssh-rsa $1" ;;
+          AAAAC3NzaC1lZDI1NTE5*) echo "ssh-ed25519 $1" ;;
+          *)                     echo "$1" ;;
+        esac
+      }
+      # adminPwd should be the MD5 crypt hash; adminPassword appeared alongside it on a real device, so pick
+      # whichever looks like a hash, else fall back to a plain-text value. Never concatenate them.
+      is_hash() { case "$1" in '$1$'*|'$5$'*|'$6$'*|'$y$'*|'$2'*) return 0 ;; *) return 1 ;; esac; }
+      PWD_HASH=""; PWD_PLAIN=""
+      if is_hash "$ADMIN_PWD"; then PWD_HASH="$ADMIN_PWD"
+      elif is_hash "$ADMIN_PASSWORD"; then PWD_HASH="$ADMIN_PASSWORD"
+      elif [ -n "$ADMIN_PASSWORD" ]; then PWD_PLAIN="$ADMIN_PASSWORD"
+      elif [ -n "$ADMIN_PWD" ]; then PWD_PLAIN="$ADMIN_PWD"
+      fi
+      setup_user() {
+        local u="$1" h g k
+        if ! id "$u" >/dev/null 2>&1; then
+          useradd -m -s /bin/bash "$u"
+          echo "$u ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/90-$u"; chmod 0440 "/etc/sudoers.d/90-$u"
+        fi
+        h="$(getent passwd "$u" | cut -d: -f6)"; g="$(id -gn "$u")"
+        if [ -n "$PWD_HASH" ]; then usermod -p "$PWD_HASH" "$u"
+        elif [ -n "$PWD_PLAIN" ]; then echo "$u:$PWD_PLAIN" | chpasswd
+        fi
+        install -d -o "$u" -g "$g" -m 0700 "$h/.ssh"
+        if [ -n "$PUBLIC_KEY" ]; then norm_key "$PUBLIC_KEY" >> "$h/.ssh/authorized_keys"; fi
+        if [ -f "$h/.ssh/authorized_keys" ]; then
+          sort -u "$h/.ssh/authorized_keys" -o "$h/.ssh/authorized_keys"
+          chown "$u:$g" "$h/.ssh/authorized_keys"; chmod 0600 "$h/.ssh/authorized_keys"
+        fi
+      }
+      if [ -n "$USER_NAME" ]; then
+        setup_user "$USER_NAME" || echo "could not set up user $USER_NAME"
+      else
+        echo "userName is empty: no account created"
+      fi
+
+      # Non-secret diagnostic (lengths and first characters only), shown at the console login prompt.
+      PWD_MODE=none; if [ -n "$PWD_HASH" ]; then PWD_MODE=hash; elif [ -n "$PWD_PLAIN" ]; then PWD_MODE=plain; fi
+      A_HEAD=n/a; if is_hash "$ADMIN_PWD"; then A_HEAD="${ADMIN_PWD:0:3}"; fi
+      B_HASH=no; if is_hash "$ADMIN_PASSWORD"; then B_HASH=yes; fi
+      DIAG="DAY0-DIAG user=[$USER_NAME] pubkey_len=${#PUBLIC_KEY} pubkey_head=${PUBLIC_KEY:0:14} adminPwd_len=${#ADMIN_PWD} head=$A_HEAD adminPassword_len=${#ADMIN_PASSWORD} is_hash=$B_HASH pwd_mode=$PWD_MODE"
+      echo "$DIAG"
+      echo "$DIAG" >> /etc/issue
+      echo "$DIAG" > /dev/console || true
+
+      ROLE="$K3S_ROLE"; [ -n "$ROLE" ] || ROLE=single
+      NODE_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')"
+
+      mkdir -p /etc/rancher/k3s
+      CFG=/etc/rancher/k3s/config.yaml
+      : > "$CFG"; chmod 0600 "$CFG"
+      [ -n "$NODE_IP" ] && echo "node-ip: $NODE_IP" >> "$CFG"
+      [ -n "$K3S_TOKEN" ] && echo "token: \"$K3S_TOKEN\"" >> "$CFG"
+
+      case "$ROLE" in
+        single)
+          echo "write-kubeconfig-mode: \"0640\"" >> "$CFG"
+          [ -n "$K3S_TLS_SAN" ] && printf 'tls-san:\n  - "%s"\n' "$K3S_TLS_SAN" >> "$CFG"
+          UNIT=k3s ;;
+        server)
+          echo "write-kubeconfig-mode: \"0640\"" >> "$CFG"
+          [ -n "$K3S_TLS_SAN" ] && printf 'tls-san:\n  - "%s"\n' "$K3S_TLS_SAN" >> "$CFG"
+          if [ -n "$K3S_SERVER_URL" ]; then echo "server: \"$K3S_SERVER_URL\"" >> "$CFG"; else echo "cluster-init: true" >> "$CFG"; fi
+          UNIT=k3s ;;
+        agent)
+          [ -n "$K3S_SERVER_URL" ] && [ -n "$K3S_TOKEN" ] || { echo "agent needs K3S_SERVER_URL and K3S_TOKEN"; exit 1; }
+          echo "server: \"$K3S_SERVER_URL\"" >> "$CFG"
+          UNIT=k3s-agent ;;
+        *) echo "unknown K3S_ROLE: $ROLE"; exit 1 ;;
+      esac
+
+      systemctl daemon-reload
+      systemctl enable --now "$UNIT"
+
+      if [ "$UNIT" = k3s ]; then
+        for i in $(seq 1 60); do
+          /usr/local/bin/k3s kubectl get nodes 2>/dev/null | grep -qw Ready && break
+          sleep 5
+        done
+        /usr/local/bin/k3s kubectl get nodes -o wide || true
+        # make kubectl usable for the portal user
+        for u in "$USER_NAME"; do
+          if [ -n "$u" ] && id "$u" >/dev/null 2>&1; then
+            uh="$(getent passwd "$u" | cut -d: -f6)"; ug="$(id -gn "$u")"
+            install -d -o "$u" -g "$ug" -m 0700 "$uh/.kube"
+            install -o "$u" -g "$ug" -m 0600 /etc/rancher/k3s/k3s.yaml "$uh/.kube/config"
+          fi
+        done
+      fi
+
+      # Encryptor stack: single node or first server only
+      if [ "$UNIT" = k3s ] && [ -z "$K3S_SERVER_URL" ]; then
+        echo "installing the encryptor stack"
+        QKD_ROLE="$QKD_ROLE" PEER_ADDR="$PEER_ADDR" IKE_PSK="$IKE_PSK" \
+        LOCAL_TS="$LOCAL_TS" REMOTE_TS="$REMOTE_TS" MACSEC_IFACE="$MACSEC_IFACE" MACSEC_ADDR="$MACSEC_ADDR" \
+        STACK_REF="$STACK_REF" STACK_TOKEN="$STACK_TOKEN" /usr/local/bin/day0-encryptor.sh \
+          || echo "encryptor install failed: see this log"
+      fi
+
+      # secrets must not linger in the clear after the unit has consumed them
+      shred -u /etc/day0/params.env 2>/dev/null || rm -f /etc/day0/params.env
+      date -Is > /var/log/day0-done
+      echo "[$(date -Is)] day0-bootstrap done (role=$ROLE)"
+
+runcmd:
+  # apply the static network, then bootstrap
+  - [ sh, -c, "networkctl reload; networkctl reconfigure ens3 || systemctl restart systemd-networkd" ]
+  - [ /usr/local/bin/day0-bootstrap.sh ]

@@ -39,35 +39,53 @@ One master/slave pair rotates keys. The master requests keys from its KME, sends
 - **SSH:** QKD can't plug into the SSH transport itself. The agent only rotates key pairs, and you still need to wire them into `sshd` or a CA.
 - **Untested:** a real KME (certificate and SAE ID mapping vary by vendor), the peer API over mTLS, and deployment on k3s.
 - **IKE authentication:** it uses a shared secret (`IKE_PSK`) for now. Certificates would be better for production.
-- **Day 0 size:** the template is about 13.8 KB. The portal limit is 20,000 characters, and the three base64 certificate parameters can push the rendered text over it.
+- **Day 0 size:** the templates are about 14 KB. The portal limit is 20,000 characters, and the three base64 certificate parameters can push the rendered text over it.
 - **Images:** `encryptor.yaml` pulls `ghcr.io/equinix-svc/svc-helm-encryptor/{qkd-agent,strongswan,macsec}:0.1.0`. Build them from `src/<name>/` and push them to that registry (or change the names in `encryptor.yaml.in`) before the first boot. A private registry needs a pull secret.
 
 ## Build and validate
 
 Edit `encryptor.yaml.in` and `src/`, then run `scripts/validate.sh`. It builds `encryptor.yaml` and the images and checks Day 0. Commit both the sources and the generated file.
 
-## Day 0 parameters
+## Day 0 templates
 
-[`day0/day0-encryptor.yaml`](day0/day0-encryptor.yaml) does what the k3s-node image's own Day 0 does, then on a `single` node or the first `server` creates ConfigMap `site` and Secret `site-secrets` in namespace `encryptor` and downloads `encryptor.yaml` into the k3s manifests directory. Render it locally with `scripts/render-day0.sh`.
+Two templates, same structure. Both do what the k3s-node image's own Day 0 does, then on a `single` node or the first `server` create ConfigMap `site` and Secret `site-secrets` in namespace `encryptor` and download `encryptor.yaml` (and `dev-kme-sim.yaml` on the first-light master) into the k3s manifests directory. Render locally with `DAY0_FILE=<file> scripts/render-day0.sh`. Log: `/var/log/day0.log`.
 
-Equinix predefined: `hostname` `userName` `publicKey` `adminPwd` `ipAddressWithCidr` `gateway`.
+| Template | Use | Portal parameters |
+|---|---|---|
+| [`day0/day0-encryptor-lite.yaml`](day0/day0-encryptor-lite.yaml) | **First light** (lab): bring up a pair quickly | 2 required, the rest optional |
+| [`day0/day0-encryptor.yaml`](day0/day0-encryptor.yaml) | **Full**: real KME, certificates, per-site values | 5 required, the rest optional |
 
-Custom parameters:
+Equinix predefined (both): `hostname` `userName` `publicKey` `adminPwd` `ipAddressWithCidr` `gateway`. Declare every other variable as a custom parameter in the portal.
+
+### First light parameters
 
 | Parameter | Required | Meaning |
 |---|---|---|
-| `K3S_ROLE` `K3S_SERVER_URL` `K3S_TOKEN` `K3S_TLS_SAN` | no | Same as the k3s-node image. The encryptor installs only on `single` or the first `server`. |
+| `QKD_ROLE` | yes | `master` or `slave`. The master is SAE-A and also runs the KME simulator; the slave is SAE-B. |
+| `PEER_ADDR` | yes | The other appliance's IP. |
+| `MACSEC_IFACE` | no | Host NIC for MACsec, e.g. `ens4`. Empty means no MACsec. |
+| `MACSEC_ADDR` | no | CIDR on the macsec interface, e.g. `10.99.0.1/24`. |
+| `LOCAL_TS` `REMOTE_TS` | no | Protected subnets. Default `0.0.0.0/0`. |
+| `IKE_PSK` | no | IKEv2 secret, identical on both ends. Default is a public lab value. |
+| `K3S_ROLE` `K3S_SERVER_URL` `K3S_TOKEN` `K3S_TLS_SAN` | no | As the k3s-node image. Leave empty for a single node. |
+| `STACK_REF` `STACK_TOKEN` | no | Repo branch or tag (default `main`). The token is only for a private fork. |
+
+Fixed by the template: SAE IDs `SAE-A` and `SAE-B`, KME at `http://127.0.0.1:8443` on the master and `http://<PEER_ADDR>:8443` on the slave, plain HTTP for the KME and the peer API. The simulator gives random keys, **not QKD**, with no authentication. ACL: allow 22, UDP 500/4500, ESP, and TCP 8443 and 8444 from the peer only.
+
+### Full parameters
+
+| Parameter | Required | Meaning |
+|---|---|---|
 | `SAE_ID` | yes | This appliance's SAE ID on its KME. |
 | `PEER_SAE_ID` | yes | The remote appliance's SAE ID. |
 | `QKD_ROLE` | yes | `master` (calls `enc_keys`, initiates IPsec) or `slave` (calls `dec_keys`). |
 | `KME_URL` | yes | ETSI GS QKD 014 base URL, e.g. `https://kme.local:8443`. |
 | `PEER_ADDR` | yes | Remote appliance IP, used for IKE and the peer API on 8444. |
-| `KME_CA_B64` `KME_CERT_B64` `KME_KEY_B64` | no | Base64 PEM CA, client certificate and key. Used for both the KME and the peer API. |
+| `KME_CA_B64` `KME_CERT_B64` `KME_KEY_B64` | no | Base64 PEM CA, client certificate and key, used for both the KME and the peer API. Without them both use plain HTTP. |
 | `IKE_PSK` | for IPsec | IKEv2 authentication secret, identical on both ends. |
 | `LOCAL_TS` `REMOTE_TS` | no | Protected subnets, e.g. `10.1.0.0/24` and `10.2.0.0/24`. Default `0.0.0.0/0`. |
-| `MACSEC_IFACE` | no | Host NIC to protect with MACsec, e.g. `ens4`. Empty means no MACsec. |
-| `MACSEC_ADDR` | no | CIDR to put on the macsec interface, e.g. `10.99.0.1/24`. |
-| `STACK_REF` | no | Branch or tag of this repo to fetch. Default `main`. |
-| `STACK_TOKEN` | no | Read-only GitHub token, only for a private fork. |
+| `MACSEC_IFACE` `MACSEC_ADDR` | no | As in first light. |
+| `K3S_ROLE` `K3S_SERVER_URL` `K3S_TOKEN` `K3S_TLS_SAN` | no | As the k3s-node image. |
+| `STACK_REF` `STACK_TOKEN` | no | As in first light. |
 
-ACL: allow 22, UDP 500/4500, ESP and TCP 8444 from the peer. Log: `/var/log/day0.log`.
+ACL: allow 22, UDP 500/4500, ESP and TCP 8444 from the peer.

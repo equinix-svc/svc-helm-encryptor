@@ -1,21 +1,20 @@
-# LAB ONLY: ETSI 014 KME simulator (random in-memory keys, no QKD, no TLS). Use as KME_URL=http://kme-sim.encryptor.svc:8443
-# only when both appliances share one cluster; otherwise run it anywhere reachable: python3 agent.py sim --port 8443
+# LAB ONLY: ETSI 014 KME simulator (random in-memory keys, no QKD, no TLS, no authentication), on the node network
+# (hostNetwork, port 8443). The first-light Day 0 installs it on the master; the slave uses http://<master-ip>:8443.
+# Restrict TCP 8443 to the peer in the ACL.
 apiVersion: apps/v1
 kind: Deployment
 metadata: { name: kme-sim, namespace: encryptor }
 spec:
   replicas: 1
+  strategy: { type: Recreate }
   selector: { matchLabels: { app: kme-sim } }
   template:
     metadata: { labels: { app: kme-sim } }
     spec:
+      hostNetwork: true
       containers:
         - name: kme-sim
           image: ghcr.io/equinix-svc/svc-helm-encryptor/qkd-agent:0.1.0
           args: [sim, --port, "8443"]
           ports: [{ containerPort: 8443 }]
----
-apiVersion: v1
-kind: Service
-metadata: { name: kme-sim, namespace: encryptor }
-spec: { selector: { app: kme-sim }, ports: [{ port: 8443 }] }
+          resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { memory: 128Mi } }

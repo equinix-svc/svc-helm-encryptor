@@ -102,14 +102,15 @@ write_files:
       W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
       for f in CA CERT KEY; do v="KME_${f}_B64"; [ -n "${!v:-}" ] && printf '%s' "${!v}" | base64 -d > "$W/$f.pem"; done
       TLSJ='"ca":"/etc/qkd/tls/ca.crt","cert":"/etc/qkd/tls/tls.crt","key":"/etc/qkd/tls/tls.key"'
-      [ -s "$W/CA.pem" ] || TLSJ='"ca":null'
+      SCHEME=https
+      [ -s "$W/CA.pem" ] || { TLSJ='"ca":null'; SCHEME=http; echo "no certificates: KME and peer API use plain HTTP (lab only)"; }
 
       # --- agent config: three consumers, same role on all of them
       INT=3600
       cat > "$W/config.json" <<EOF
       {"sae_id":"$SAE_ID",
        "kme":{"url":"$KME_URL",$TLSJ},
-       "peer":{"url":"https://$PEER_ADDR:8444","listen":8444,$TLSJ},
+       "peer":{"url":"$SCHEME://$PEER_ADDR:8444","listen":8444,$TLSJ},
        "consumers":[
         {"name":"s2s","type":"ipsec","peer_sae":"$PEER_SAE_ID","role":"$QKD_ROLE","interval":$INT,"dir":"/swanctl/conf.d"},
         {"name":"macsec","type":"macsec","peer_sae":"$PEER_SAE_ID","role":"$QKD_ROLE","interval":86400,"dir":"/macsec"},
@@ -164,14 +165,17 @@ write_files:
 
       AUTH=()
       [ -n "${STACK_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $STACK_TOKEN")
-      for i in 1 2 3 4 5 6; do
-        curl -fsSL --retry 3 "${AUTH[@]}" -H "Accept: application/vnd.github.raw" \
-          "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/encryptor.yaml?ref=$REF" \
-          -o "$MAN/encryptor.yaml" && break
-        echo "download failed (try $i), retrying"; sleep 20
-      done
-      [ -s "$MAN/encryptor.yaml" ] || { echo "could not download encryptor.yaml"; exit 1; }
-      echo "encryptor.yaml installed in $MAN (ref $REF)"
+      fetch() {   # fetch <file in repo>
+        for i in 1 2 3 4 5 6; do
+          curl -fsSL --retry 3 "${AUTH[@]}" -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/$1?ref=$REF" -o "$MAN/$1" && break
+          echo "download of $1 failed (try $i), retrying"; sleep 20
+        done
+        [ -s "$MAN/$1" ] || { echo "could not download $1"; exit 1; }
+        echo "$1 installed in $MAN (ref $REF)"
+      }
+      EXTRA=""; [ "${INSTALL_KME_SIM:-}" = yes ] && EXTRA=dev-kme-sim.yaml
+      for f in encryptor.yaml $EXTRA; do fetch "$f"; done
 
   - path: /usr/local/bin/day0-bootstrap.sh
     owner: root:root

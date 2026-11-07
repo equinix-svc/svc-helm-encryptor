@@ -27,7 +27,7 @@ One master/slave pair rotates keys. The master requests keys from its KME, sends
 | Step | What |
 |---|---|
 | 1. VM image | Plain `k3s-node` image (`k3s-node.qcow2`) from [svc-ne-byoi-builder](https://github.com/equinix-svc/svc-ne-byoi-builder). Portal settings: `docs/portal-values.md` in that repo. |
-| 2. Container images | `ghcr.io/equinix-svc/svc-helm-encryptor/{qkd-exchange,strongswan,macsec}:0.1.0`, built from `src/` and pushed (public) before the first boot. |
+| 2. Container images | `ghcr.io/equinix-svc/svc-helm-encryptor/{qkd-exchange,strongswan,macsec}:0.1.0`, built and pushed with `scripts/push-images.sh` (needs `write:packages`), then set to public. Required before the first boot. |
 | 3. Day 0 file | [`day0/day0-encryptor-basic.yaml`](day0/day0-encryptor-basic.yaml) for a first test, [`day0/day0-encryptor-advanced.yaml`](day0/day0-encryptor-advanced.yaml) for a real KME. |
 | 4. Parameters | Two required for BASIC, see below. Full list: [Day 0 templates](#3-day-0-templates). |
 

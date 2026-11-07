@@ -1,6 +1,6 @@
 #!/bin/sh
 # MACsec (IEEE 802.1AE) with MKA (802.1X-2010) on a host NIC. The CAK/CKN come from /macsec/macsec.conf, written
-# by qkd-agent from a QKD key. When the file changes, wpa_supplicant is reconfigured (new CAK = new MKA session).
+# by qkd-exchange from a QKD key. When the file changes, wpa_supplicant is reconfigured (new CAK = new MKA session).
 # Settings from /etc/macsec/macsec.env: MACSEC_IFACE (empty = idle), MACSEC_ADDR (optional CIDR on the macsec interface).
 set -eu
 [ -r /etc/macsec/macsec.env ] && . /etc/macsec/macsec.env

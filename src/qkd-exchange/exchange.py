@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""qkd-agent - fetch keys from an ETSI GS QKD 014 KME and hand them to IPsec, MACsec and SSH consumers.
+"""qkd-exchange - fetch keys from an ETSI GS QKD 014 KME and hand them to IPsec, MACsec and SSH consumers.
 
-  agent.py run  -c /etc/qkd/config.json     the appliance agent (KME client + peer API + appliers)
-  agent.py sim  --port 8443                 a throw-away KME simulator for tests (NOT secure, in-memory)
+  exchange.py run  -c /etc/qkd/config.json     the appliance exchange (KME client + peer API + appliers)
+  exchange.py sim  --port 8443                 a throw-away KME simulator for tests (NOT secure, in-memory)
 
 ETSI 014 roles: the *master* SAE calls enc_keys(slave_SAE_ID) and gets {key_ID, key}; it tells the slave SAE the
 key_ID in-band (here: the peer API); the *slave* SAE calls dec_keys(master_SAE_ID, key_ID). Keys are never logged.
@@ -13,7 +13,7 @@ import argparse, base64, hashlib, hmac, json, logging, os, ssl, sys, tempfile, t
 import urllib.error, urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-log = logging.getLogger("qkd-agent")
+log = logging.getLogger("qkd-exchange")
 
 
 # ---------------------------------------------------------------- ETSI 014 client
@@ -112,8 +112,8 @@ def apply(c, key, key_id, extra):
         APPLY[c["type"]](c, key, key_id, extra)
 
 
-# ---------------------------------------------------------------- agent
-class Agent:
+# ---------------------------------------------------------------- exchange
+class Exchange:
     def __init__(self, cfg):
         self.cfg = cfg
         self.kme = KME(cfg["kme"])
@@ -181,8 +181,8 @@ class Agent:
         return {"sae_id": self.cfg["sae_id"], "consumers": self.state}
 
 
-def serve_peer(agent):
-    cfg = agent.cfg["peer"]
+def serve_peer(ex):
+    cfg = ex.cfg["peer"]
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -194,12 +194,12 @@ def serve_peer(agent):
             self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
         def do_GET(self):
-            self._send(200, agent.status() if self.path == "/v1/status" else {"ok": True})
+            self._send(200, ex.status() if self.path == "/v1/status" else {"ok": True})
 
         def do_POST(self):
             try:
                 b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
-                {"/v1/stage": agent.on_stage, "/v1/commit": agent.on_commit}[self.path](b)
+                {"/v1/stage": ex.on_stage, "/v1/commit": ex.on_commit}[self.path](b)
                 self._send(200, {"ok": True})
             except Exception as e:  # noqa: BLE001
                 log.error("peer %s failed: %s", self.path, e)
@@ -217,11 +217,11 @@ def serve_peer(agent):
 
 def run(path):
     cfg = json.load(open(path))
-    agent = Agent(cfg)
-    threading.Thread(target=serve_peer, args=(agent,), daemon=True).start()
+    ex = Exchange(cfg)
+    threading.Thread(target=serve_peer, args=(ex,), daemon=True).start()
     for c in cfg["consumers"]:
         if c["role"] == "master":
-            threading.Thread(target=agent.master_loop, args=(c,), daemon=True).start()
+            threading.Thread(target=ex.master_loop, args=(c,), daemon=True).start()
     while True:
         time.sleep(3600)
 

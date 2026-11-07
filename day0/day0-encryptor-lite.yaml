@@ -104,7 +104,7 @@ write_files:
       SCHEME=https
       [ -s "$W/CA.pem" ] || { TLSJ='"ca":null'; SCHEME=http; echo "no certificates: KME and peer API use plain HTTP (lab only)"; }
 
-      # --- agent config: three consumers, same role on all of them
+      # --- exchange config: three consumers, same role on all of them
       INT=3600
       cat > "$W/config.json" <<EOF
       {"sae_id":"$SAE_ID",

@@ -1,8 +1,8 @@
 # QKD-keyed encryptor appliance for a single k3s node. Source template: scripts/build.py turns it into encryptor.yaml.
-# One Pod (hostNetwork) with three consumers of ETSI GS QKD 014 keys, fed by qkd-agent:
+# One Pod (hostNetwork) with three consumers of ETSI GS QKD 014 keys, fed by qkd-exchange:
 #   strongswan : IPsec IKEv2 tunnels, QKD key injected as RFC 8784 PPK
 #   macsec     : MACsec (IEEE 802.1AE) on a host NIC, QKD key as MKA CAK (wpa_supplicant)
-#   qkd-agent  : KME client + peer API; also rotates SSH key pairs (written under /var/lib/encryptor/ssh)
+#   qkd-exchange  : KME client + peer API; also rotates SSH key pairs (written under /var/lib/encryptor/ssh)
 # Site-specific Secret/ConfigMap (site, site-secrets) are NOT in this file: Day 0 creates them (see README.md).
 apiVersion: v1
 kind: Namespace
@@ -36,8 +36,8 @@ spec:
             - { name: site, mountPath: /etc/macsec/macsec.env, subPath: macsec.env, readOnly: true }
             - { name: macsec, mountPath: /macsec, readOnly: true }
           resources: { requests: { cpu: 20m, memory: 32Mi }, limits: { memory: 128Mi } }
-        - name: qkd-agent
-          image: ghcr.io/equinix-svc/svc-helm-encryptor/qkd-agent:0.1.0
+        - name: qkd-exchange
+          image: ghcr.io/equinix-svc/svc-helm-encryptor/qkd-exchange:0.1.0
           securityContext: { runAsUser: 0 }    # writes files shared with the root-owned containers above
           ports: [{ containerPort: 8444, hostPort: 8444 }]
           livenessProbe: { tcpSocket: { port: 8444 }, periodSeconds: 30 }

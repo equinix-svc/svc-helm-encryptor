@@ -14,7 +14,7 @@ spec:
       hostNetwork: true
       containers:
         - name: kme-sim
-          image: ghcr.io/equinix-svc/svc-helm-encryptor/qkd-agent:0.1.0
+          image: ghcr.io/equinix-svc/svc-helm-encryptor/qkd-exchange:0.1.0
           args: [sim, --port, "8443"]
           ports: [{ containerPort: 8443 }]
           resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { memory: 128Mi } }

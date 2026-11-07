@@ -1,6 +1,6 @@
 #cloud-config
 # Day 0 template for the Equinix Network Edge custom VNF profile "k3s-node" (image from equinix-svc/svc-ne-byoi-builder),
-# extended to install the QKD encryptor appliance of this repo (IPsec + TLS tunnels + SSH key rotation).
+# extended to install the QKD encryptor appliance of this repo (IPsec + MACsec + SSH key rotation).
 #
 # Placeholders use the Equinix inline syntax (case-sensitive names).
 #   Equinix predefined: hostname userName publicKey adminPwd ipAddressWithCidr gateway
@@ -13,8 +13,8 @@
 #     KME_CA_B64 KME_CERT_B64 KME_KEY_B64   base64 PEM: CA, client cert and key; used for the KME and the peer API
 #     IKE_PSK       IKEv2 authentication secret, identical on both ends (required for IPsec)
 #     LOCAL_TS REMOTE_TS   protected subnets, e.g. 10.1.0.0/24 and 10.2.0.0/24
-#     TLS_MODE      server | client | empty for no TLS tunnel
-#     TLS_ACCEPT    port to listen on (server: public; client: local)   TLS_CONNECT  host:port to connect to
+#     MACSEC_IFACE  host NIC to protect with MACsec, e.g. ens4 (empty = no MACsec)
+#     MACSEC_ADDR   optional CIDR to put on the macsec interface, e.g. 10.99.0.1/24
 #     STACK_REF STACK_TOKEN   branch/tag of this repo to fetch (default main); token only for a private fork
 # On a single node or the first server, once k3s is Ready, it creates Secret site-secrets and ConfigMap site in
 # namespace encryptor and downloads encryptor.yaml into the k3s manifests directory.
@@ -77,9 +77,8 @@ write_files:
       IKE_PSK='[(${IKE_PSK})]'
       LOCAL_TS='[(${LOCAL_TS})]'
       REMOTE_TS='[(${REMOTE_TS})]'
-      TLS_MODE='[(${TLS_MODE})]'
-      TLS_ACCEPT='[(${TLS_ACCEPT})]'
-      TLS_CONNECT='[(${TLS_CONNECT})]'
+      MACSEC_IFACE='[(${MACSEC_IFACE})]'
+      MACSEC_ADDR='[(${MACSEC_ADDR})]'
       STACK_REF='[(${STACK_REF})]'
       STACK_TOKEN='[(${STACK_TOKEN})]'
 
@@ -113,22 +112,12 @@ write_files:
        "peer":{"url":"https://$PEER_ADDR:8444","listen":8444,$TLSJ},
        "consumers":[
         {"name":"s2s","type":"ipsec","peer_sae":"$PEER_SAE_ID","role":"$QKD_ROLE","interval":$INT,"dir":"/swanctl/conf.d"},
-        {"name":"web","type":"tls","peer_sae":"$PEER_SAE_ID","role":"$QKD_ROLE","interval":$INT,"dir":"/psk"},
+        {"name":"macsec","type":"macsec","peer_sae":"$PEER_SAE_ID","role":"$QKD_ROLE","interval":86400,"dir":"/macsec"},
         {"name":"ssh","type":"ssh","peer_sae":"$PEER_SAE_ID","role":"$QKD_ROLE","interval":86400,"dir":"/ssh"}]}
       EOF
 
-      # --- stunnel: TLS 1.3 + external PSK from QKD
-      : > "$W/stunnel.conf"
-      if [ -n "${TLS_MODE:-}" ]; then
-        { echo "foreground = yes"; echo "[web]"
-          [ "$TLS_MODE" = client ] && echo "client = yes"
-          echo "accept = ${TLS_ACCEPT}"; echo "connect = ${TLS_CONNECT}"
-          echo "PSKsecrets = /psk/web.txt"; echo "sslVersionMin = TLSv1.3"
-          echo "ciphersuites = TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256"; } > "$W/stunnel.conf"
-      else
-        # no TLS tunnel requested: keep the container healthy on a loopback-only placeholder service
-        printf 'foreground = yes\n[placeholder]\naccept = 127.0.0.1:65500\nconnect = 127.0.0.1:65501\nPSKsecrets = /psk/web.txt\n' > "$W/stunnel.conf"
-      fi
+      # --- macsec settings read by the macsec container
+      printf 'MACSEC_IFACE=%s\nMACSEC_ADDR=%s\n' "${MACSEC_IFACE:-}" "${MACSEC_ADDR:-}" > "$W/macsec.env"
 
       # --- swanctl: IKEv2 + PPK required (no silent downgrade to a non-QKD tunnel)
       START=none; [ "$QKD_ROLE" = master ] && START=start
@@ -167,7 +156,7 @@ write_files:
       EOF
 
       $K create namespace $NS --dry-run=client -o yaml | $K apply -f -
-      $K -n $NS create configmap site --from-file=config.json="$W/config.json" --from-file=stunnel.conf="$W/stunnel.conf" \
+      $K -n $NS create configmap site --from-file=config.json="$W/config.json" --from-file=macsec.env="$W/macsec.env" \
         --dry-run=client -o yaml | $K apply -f -
       ARGS=(--from-file=swanctl.conf="$W/swanctl.conf")
       [ -s "$W/CA.pem" ] && ARGS+=(--from-file=ca.crt="$W/CA.pem" --from-file=tls.crt="$W/CERT.pem" --from-file=tls.key="$W/KEY.pem")
@@ -300,7 +289,7 @@ write_files:
         echo "installing the encryptor stack"
         SAE_ID="$SAE_ID" PEER_SAE_ID="$PEER_SAE_ID" QKD_ROLE="$QKD_ROLE" KME_URL="$KME_URL" PEER_ADDR="$PEER_ADDR" \
         KME_CA_B64="$KME_CA_B64" KME_CERT_B64="$KME_CERT_B64" KME_KEY_B64="$KME_KEY_B64" IKE_PSK="$IKE_PSK" \
-        LOCAL_TS="$LOCAL_TS" REMOTE_TS="$REMOTE_TS" TLS_MODE="$TLS_MODE" TLS_ACCEPT="$TLS_ACCEPT" TLS_CONNECT="$TLS_CONNECT" \
+        LOCAL_TS="$LOCAL_TS" REMOTE_TS="$REMOTE_TS" MACSEC_IFACE="$MACSEC_IFACE" MACSEC_ADDR="$MACSEC_ADDR" \
         STACK_REF="$STACK_REF" STACK_TOKEN="$STACK_TOKEN" /usr/local/bin/day0-encryptor.sh \
           || echo "encryptor install failed: see this log"
       fi

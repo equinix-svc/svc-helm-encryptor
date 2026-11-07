@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""qkd-agent - fetch keys from an ETSI GS QKD 014 KME and hand them to IPsec, TLS and SSH consumers.
+"""qkd-agent - fetch keys from an ETSI GS QKD 014 KME and hand them to IPsec, MACsec and SSH consumers.
 
   agent.py run  -c /etc/qkd/config.json     the appliance agent (KME client + peer API + appliers)
   agent.py sim  --port 8443                 a throw-away KME simulator for tests (NOT secure, in-memory)
@@ -61,10 +61,16 @@ def apply_ipsec(c, key, key_id, extra):
     atomic_write(os.path.join(c.get("dir", "/swanctl/conf.d"), "10-ppk-%s.conf" % c["name"]), conf)
 
 
-def apply_tls(c, key, key_id, extra):
-    """TLS 1.3 external PSK file for stunnel (identity:secret). stunnel is reloaded by its entrypoint."""
-    line = "qkd-%s:%s\n" % (c["name"], base64.b64encode(key).decode())
-    atomic_write(os.path.join(c.get("dir", "/psk"), c["name"] + ".txt"), line)
+def apply_macsec(c, key, key_id, extra):
+    """MACsec: the QKD key is the MKA CAK (128 or 256 bit), the key_ID (a UUID, 16 bytes) is the CKN. wpa_supplicant config."""
+    if len(key) not in (16, 32):
+        raise ValueError("MACsec CAK must be 128 or 256 bits, got %d" % (8 * len(key)))
+    ckn = key_id.replace("-", "")
+    prio = 16 if c["role"] == "master" else 64      # lowest priority value becomes MKA key server
+    conf = ("ctrl_interface=/run/wpa_supplicant\nap_scan=0\neapol_version=3\nnetwork={\n  key_mgmt=NONE\n  eapol_flags=0\n"
+            "  macsec_policy=1\n  macsec_csindex=%d\n  mka_cak=%s\n  mka_ckn=%s\n  mka_priority=%d\n}\n"
+            % (1 if len(key) == 32 else 0, key.hex(), ckn, prio))
+    atomic_write(os.path.join(c.get("dir", "/macsec"), "macsec.conf"), conf)
 
 
 def _ssh_pub(priv):
@@ -95,7 +101,7 @@ def apply_ssh_slave(c, key, key_id, extra):
     atomic_write(os.path.join(c.get("dir", "/ssh"), c["name"], "authorized_keys"), pub + "\n", 0o644)
 
 
-APPLY = {"ipsec": apply_ipsec, "tls": apply_tls}
+APPLY = {"ipsec": apply_ipsec, "macsec": apply_macsec}
 
 
 def apply(c, key, key_id, extra):

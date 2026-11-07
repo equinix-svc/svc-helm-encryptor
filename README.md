@@ -59,10 +59,10 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 | Parameter | BASIC | ADVANCED | Default | Example (paste in the portal) | Meaning |
 |---|---|---|---|---|---|
 | `QKD_ROLE` | yes | yes | - | `master` | `master` (calls `enc_keys`, initiates IPsec) or `slave` (calls `dec_keys`). In BASIC, the master is SAE-A and also runs the KME simulator; the slave is SAE-B. |
-| `PEER_ADDR` | yes | yes | - | `203.0.113.10` | The other appliance's IP, used for IKE and the peer API on 8444. |
+| `PEER_ADDR` | yes | yes | - | `10.0.0.12` | The other appliance's address, used for IKE and the peer API on 8444. Any address reachable from this appliance works, a private one included. With mutual TLS (ADVANCED) it must match a name or IP in the peer certificate. |
 | `SAE_ID` | - | yes | - | `SAE-A` | This appliance's SAE ID on its KME. BASIC fixes it to `SAE-A` (master) or `SAE-B` (slave). |
 | `PEER_SAE_ID` | - | yes | - | `SAE-B` | The remote appliance's SAE ID. BASIC fixes it to the opposite of the local one. |
-| `KME_URL` | - | yes | - | `https://kme.example.net:8443` | ETSI GS QKD 014 base URL. `https://` means mutual TLS: the certificates are loaded after boot (section 4). BASIC uses `http://127.0.0.1:8443` on the master and `http://<PEER_ADDR>:8443` on the slave. |
+| `KME_URL` | - | yes | - | `https://kme.example.net:8443` | ETSI GS QKD 014 base URL. `https://` means mutual TLS: the certificates are loaded after boot (section 4), and the host in the URL (name or IP) must be in the KME certificate. BASIC uses `http://127.0.0.1:8443` on the master and `http://<PEER_ADDR>:8443` on the slave. |
 | `IKE_PSK` | yes | yes | - | `4f9c2a7e1b8d3c6a5e0f9b2d7c4a1e83` | IKEv2 secret, identical on both ends, never stored in the repo. The IPsec tunnel is always configured, so both templates refuse to start without it. Generate with `openssl rand -hex 16`. |
 | `LOCAL_TS` | no | no | `0.0.0.0/0` | `10.1.0.0/24` | Local protected subnet. |
 | `REMOTE_TS` | no | no | `0.0.0.0/0` | `10.2.0.0/24` | Remote protected subnet. |
@@ -71,10 +71,10 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 | `K3S_ROLE` | no | no | `single` | `single` | `single`: standalone node. `server`: control-plane node. `agent`: k3s worker node that joins an existing cluster; the encryptor is not installed on it. |
 | `K3S_SERVER_URL` | no (agent only) | no (agent only) | empty | `https://10.0.0.5:6443` | URL used by an agent to join the k3s cluster. Empty for `single` or the first `server`. |
 | `K3S_TOKEN` | no (agent only) | no (agent only) | empty | `K10abc123def456::server:789xyz` | Secret used to join the k3s cluster. |
-| `K3S_TLS_SAN` | no | no | empty | `203.0.113.20` | Extra API certificate name or IP. |
+| `K3S_TLS_SAN` | no | no | empty | `10.0.0.11` | Extra API certificate name or IP. |
 | `STACK_REF` | no | no | `main` | `main` | Repo branch or tag to fetch. Pin a tag for repeatable boots. |
 | `STACK_TOKEN` | no | no | empty | leave empty | Read-only GitHub token, only for a private fork. |
-| `REGISTRY_USER` | no | no | empty | `festrade-equinix` | GitHub login used to pull private images from ghcr.io. Leave empty when the packages are public. |
+| `REGISTRY_USER` | no | no | empty | `my-github-user` | GitHub login used to pull private images from ghcr.io. Leave empty when the packages are public. |
 | `REGISTRY_TOKEN` | no | no | empty | `ghp_AbCdEf1234567890AbCdEf1234567890AbCd` | Classic personal access token with only `read:packages`. Written to `/etc/rancher/k3s/registries.yaml` (root only) before k3s starts. Expires: set a reminder to rotate it. |
 
 BASIC uses plain HTTP for the KME and the peer API. ADVANCED does too when `KME_URL` is `http://`. Its simulator gives random keys, **not QKD**, with no authentication.
@@ -91,7 +91,7 @@ The KME client certificates are **not** Day 0 parameters, so the private key nev
 | File | Content |
 |---|---|
 | `ca.crt` | CA that signed the KME certificate and the peer appliance's certificate |
-| `tls.crt` | This appliance's client certificate (the KME maps it to the SAE ID). It is also the server certificate of the peer API, so its SAN must contain the appliance IP |
+| `tls.crt` | This appliance's client certificate (the KME maps it to the SAE ID). It is also the server certificate of the peer API, so its SAN must contain the value other appliances use for it in `PEER_ADDR` (an IP or a DNS name) |
 | `tls.key` | Its private key |
 
 1. Copy the three PEM files to the node (`scp`).

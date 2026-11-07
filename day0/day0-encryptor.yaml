@@ -11,7 +11,7 @@
 #     KME_URL       https://kme.local:8443 (ETSI GS QKD 014 base URL)  (required)
 #     PEER_ADDR     remote appliance IP (IKE, peer API on 8444)        (required)
 #     KME_CA_B64 KME_CERT_B64 KME_KEY_B64   base64 PEM: CA, client cert and key; used for the KME and the peer API
-#     IKE_PSK       IKEv2 authentication secret, identical on both ends (required for IPsec)
+#     IKE_PSK       IKEv2 authentication secret, identical on both ends (required)
 #     LOCAL_TS REMOTE_TS   protected subnets, e.g. 10.1.0.0/24 and 10.2.0.0/24
 #     MACSEC_IFACE  host NIC to protect with MACsec, e.g. ens4 (empty = no MACsec)
 #     MACSEC_ADDR   optional CIDR to put on the macsec interface, e.g. 10.99.0.1/24
@@ -93,7 +93,7 @@ write_files:
       MAN=/var/lib/rancher/k3s/server/manifests
       REF="${STACK_REF:-main}"
       NS=encryptor
-      for v in SAE_ID PEER_SAE_ID QKD_ROLE KME_URL PEER_ADDR; do
+      for v in SAE_ID PEER_SAE_ID QKD_ROLE KME_URL PEER_ADDR IKE_PSK; do
         [ -n "${!v:-}" ] || { echo "missing required parameter $v"; exit 1; }
       done
       case "$QKD_ROLE" in master) PEER_ROLE=slave ;; slave) PEER_ROLE=master ;; *) echo "QKD_ROLE must be master|slave"; exit 1 ;; esac

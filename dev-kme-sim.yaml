@@ -11,7 +11,7 @@ spec:
     spec:
       containers:
         - name: kme-sim
-          image: ghcr.io/equinix-svc/svc-encryptor/qkd-agent:0.1.0
+          image: ghcr.io/equinix-svc/svc-helm-encryptor/qkd-agent:0.1.0
           args: [sim, --port, "8443"]
           ports: [{ containerPort: 8443 }]
 ---

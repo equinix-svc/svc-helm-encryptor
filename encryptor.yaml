@@ -23,21 +23,21 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       containers:
         - name: strongswan
-          image: ghcr.io/equinix-svc/svc-encryptor/strongswan:0.1.0
+          image: ghcr.io/equinix-svc/svc-helm-encryptor/strongswan:0.1.0
           securityContext: { capabilities: { add: [NET_ADMIN, NET_RAW, NET_BIND_SERVICE] } }
           volumeMounts:
             - { name: swanctl-main, mountPath: /etc/swanctl/swanctl.conf, subPath: swanctl.conf, readOnly: true }
             - { name: swanctl-conf-d, mountPath: /etc/swanctl/conf.d }
           resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 256Mi } }
         - name: stunnel
-          image: ghcr.io/equinix-svc/svc-encryptor/stunnel:0.1.0
+          image: ghcr.io/equinix-svc/svc-helm-encryptor/stunnel:0.1.0
           securityContext: { capabilities: { add: [NET_BIND_SERVICE] } }
           volumeMounts:
             - { name: site, mountPath: /etc/stunnel/stunnel.conf, subPath: stunnel.conf, readOnly: true }
             - { name: psk, mountPath: /psk, readOnly: true }
           resources: { requests: { cpu: 50m, memory: 32Mi }, limits: { memory: 256Mi } }
         - name: qkd-agent
-          image: ghcr.io/equinix-svc/svc-encryptor/qkd-agent:0.1.0
+          image: ghcr.io/equinix-svc/svc-helm-encryptor/qkd-agent:0.1.0
           securityContext: { runAsUser: 0 }    # writes files shared with the root-owned containers above
           ports: [{ containerPort: 8444, hostPort: 8444 }]
           livenessProbe: { tcpSocket: { port: 8444 }, periodSeconds: 30 }

@@ -177,7 +177,7 @@ write_files:
       [ -n "${STACK_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $STACK_TOKEN")
       for i in 1 2 3 4 5 6; do
         curl -fsSL --retry 3 "${AUTH[@]}" -H "Accept: application/vnd.github.raw" \
-          "https://api.github.com/repos/equinix-svc/svc-encryptor/contents/encryptor.yaml?ref=$REF" \
+          "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/encryptor.yaml?ref=$REF" \
           -o "$MAN/encryptor.yaml" && break
         echo "download failed (try $i), retrying"; sleep 20
       done

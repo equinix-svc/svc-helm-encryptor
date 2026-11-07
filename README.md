@@ -1,4 +1,4 @@
-# svc-encryptor
+# svc-helm-encryptor
 
 QKD-keyed encryptor appliance for a single k3s node. It is one `encryptor.yaml` for a k3s node, plus an Equinix Day 0 template that creates the site-specific Secret and ConfigMap. It has not been deployed on a device or tested against a real KME. The pieces below were tested in Docker.
 
@@ -31,7 +31,7 @@ One master/slave pair rotates keys. The master requests keys from its KME, sends
 - **SSH:** QKD can't plug into the SSH transport itself. The agent only rotates key pairs (under `/var/lib/encryptor/ssh`), and you still need to wire them into `sshd` or a CA.
 - **Untested:** a real KME (certificate and SAE ID mapping vary by vendor), the peer API over mTLS, and deployment on k3s.
 - **IKE authentication:** it uses a shared secret (`IKE_PSK`) for now. Certificates would be better for production.
-- **Images:** `encryptor.yaml` pulls `ghcr.io/equinix-svc/svc-encryptor/{qkd-agent,strongswan,stunnel}:0.1.0`. Build them from `src/<name>/` and push them to that registry (or change the names in `encryptor.yaml.in`) before the first boot. A private registry needs a pull secret.
+- **Images:** `encryptor.yaml` pulls `ghcr.io/equinix-svc/svc-helm-encryptor/{qkd-agent,strongswan,stunnel}:0.1.0`. Build them from `src/<name>/` and push them to that registry (or change the names in `encryptor.yaml.in`) before the first boot. A private registry needs a pull secret.
 
 ## Build and validate
 

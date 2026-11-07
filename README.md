@@ -78,8 +78,8 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 | `K3S_TLS_SAN` | no | no | empty | `172.16.0.11` | Extra name or IP in the k3s API server certificate, for `kubectl` or agents reaching port 6443 from outside. Not needed for local `sudo k3s kubectl`. |
 | `STACK_REF` | no | no | `main` | `main` | Repo branch or tag to fetch. Pin a tag for repeatable boots. |
 | `STACK_TOKEN` | no | no | empty | leave empty | Read-only GitHub token, only for a private fork. |
-| `REGISTRY_USER` | no | no | empty | `my-github-user` | GitHub login used to pull private images from ghcr.io. Leave empty when the packages are public. |
-| `REGISTRY_TOKEN` | no | no | empty | `ghp_AbCdEf1234567890AbCdEf1234567890AbCd` | Classic personal access token with only `read:packages`. Written to `/etc/rancher/k3s/registries.yaml` (root only) before k3s starts. Expires: set a reminder to rotate it. |
+| `REGISTRY_USER` | yes, while the images are private | yes, while the images are private | empty | `my-github-user` | GitHub login used to pull private images from ghcr.io. Leave empty only when the packages are public; Day 0 logs a warning when it is empty. |
+| `REGISTRY_TOKEN` | yes, while the images are private | yes, while the images are private | empty | `ghp_AbCdEf1234567890AbCdEf1234567890AbCd` | Classic personal access token with only `read:packages`. Written to `/etc/rancher/k3s/registries.yaml` (root only) before k3s starts. Expires: set a reminder to rotate it. |
 
 BASIC uses plain HTTP for the KME and the peer API. ADVANCED does too when `KME_URL` is `http://`. Its simulator gives random keys, **not QKD**, with no authentication.
 

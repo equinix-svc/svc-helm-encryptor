@@ -278,6 +278,8 @@ write_files:
       EOF
         )
         echo "registry credentials for ghcr.io written"
+      else
+        echo "WARNING: REGISTRY_TOKEN is empty: the container images on ghcr.io must be public, otherwise the encryptor Pod cannot pull them"
       fi
 
       systemctl daemon-reload

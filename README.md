@@ -59,33 +59,42 @@ Equinix predefined (both): `hostname` `userName` `publicKey` `adminPwd` `ipAddre
 
 ### First light parameters
 
-| Parameter | Required | Meaning |
-|---|---|---|
-| `QKD_ROLE` | yes | `master` or `slave`. The master is SAE-A and also runs the KME simulator; the slave is SAE-B. |
-| `PEER_ADDR` | yes | The other appliance's IP. |
-| `MACSEC_IFACE` | no | Host NIC for MACsec, e.g. `ens4`. Empty means no MACsec. |
-| `MACSEC_ADDR` | no | CIDR on the macsec interface, e.g. `10.99.0.1/24`. |
-| `LOCAL_TS` `REMOTE_TS` | no | Protected subnets. Default `0.0.0.0/0`. |
-| `IKE_PSK` | no | IKEv2 secret, identical on both ends. Default is a public lab value. |
-| `K3S_ROLE` `K3S_SERVER_URL` `K3S_TOKEN` `K3S_TLS_SAN` | no | As the k3s-node image. Leave empty for a single node. |
-| `STACK_REF` `STACK_TOKEN` | no | Repo branch or tag (default `main`). The token is only for a private fork. |
+| Parameter | Required | Example (paste in the portal) | Meaning |
+|---|---|---|---|
+| `QKD_ROLE` | yes | `master` | `master` or `slave`. The master is SAE-A and also runs the KME simulator; the slave is SAE-B. |
+| `PEER_ADDR` | yes | `203.0.113.10` | The other appliance's IP. |
+| `MACSEC_IFACE` | no | `ens4` | Host NIC for MACsec. Empty means no MACsec. |
+| `MACSEC_ADDR` | no | `10.99.0.1/24` | CIDR on the macsec interface. |
+| `LOCAL_TS` | no | `10.1.0.0/24` | Local protected subnet. Default `0.0.0.0/0`. |
+| `REMOTE_TS` | no | `10.2.0.0/24` | Remote protected subnet. Default `0.0.0.0/0`. |
+| `IKE_PSK` | no | `4f9c2a7e1b8d3c6a5e0f9b2d7c4a1e83` | IKEv2 secret, identical on both ends. Default is a public lab value. |
+| `K3S_ROLE` | no | `single` | As the k3s-node image. Default `single`. |
+| `K3S_SERVER_URL` `K3S_TOKEN` `K3S_TLS_SAN` | no | leave empty | Only to join or extend a k3s cluster. |
+| `STACK_REF` | no | `main` | Repo branch or tag to fetch. Pin a tag for repeatable boots. |
+| `STACK_TOKEN` | no | leave empty | Read-only GitHub token, only for a private fork. |
 
 Fixed by the template: SAE IDs `SAE-A` and `SAE-B`, KME at `http://127.0.0.1:8443` on the master and `http://<PEER_ADDR>:8443` on the slave, plain HTTP for the KME and the peer API. The simulator gives random keys, **not QKD**, with no authentication. ACL: allow 22, UDP 500/4500, ESP, and TCP 8443 and 8444 from the peer only.
 
 ### Full parameters
 
-| Parameter | Required | Meaning |
-|---|---|---|
-| `SAE_ID` | yes | This appliance's SAE ID on its KME. |
-| `PEER_SAE_ID` | yes | The remote appliance's SAE ID. |
-| `QKD_ROLE` | yes | `master` (calls `enc_keys`, initiates IPsec) or `slave` (calls `dec_keys`). |
-| `KME_URL` | yes | ETSI GS QKD 014 base URL, e.g. `https://kme.local:8443`. |
-| `PEER_ADDR` | yes | Remote appliance IP, used for IKE and the peer API on 8444. |
-| `KME_CA_B64` `KME_CERT_B64` `KME_KEY_B64` | no | Base64 PEM CA, client certificate and key, used for both the KME and the peer API. Without them both use plain HTTP. |
-| `IKE_PSK` | for IPsec | IKEv2 authentication secret, identical on both ends. |
-| `LOCAL_TS` `REMOTE_TS` | no | Protected subnets, e.g. `10.1.0.0/24` and `10.2.0.0/24`. Default `0.0.0.0/0`. |
-| `MACSEC_IFACE` `MACSEC_ADDR` | no | As in first light. |
-| `K3S_ROLE` `K3S_SERVER_URL` `K3S_TOKEN` `K3S_TLS_SAN` | no | As the k3s-node image. |
-| `STACK_REF` `STACK_TOKEN` | no | As in first light. |
+| Parameter | Required | Example (paste in the portal) | Meaning |
+|---|---|---|---|
+| `SAE_ID` | yes | `SAE-A` | This appliance's SAE ID on its KME. |
+| `PEER_SAE_ID` | yes | `SAE-B` | The remote appliance's SAE ID. |
+| `QKD_ROLE` | yes | `master` | `master` (calls `enc_keys`, initiates IPsec) or `slave` (calls `dec_keys`). |
+| `KME_URL` | yes | `https://kme.example.net:8443` | ETSI GS QKD 014 base URL. |
+| `PEER_ADDR` | yes | `203.0.113.10` | Remote appliance IP, used for IKE and the peer API on 8444. |
+| `KME_CA_B64` | no | `LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t...` | Output of `base64 -w0 ca.pem`. |
+| `KME_CERT_B64` | no | `LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t...` | Output of `base64 -w0 client.crt`. |
+| `KME_KEY_B64` | no | `LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0t...` | Output of `base64 -w0 client.key`. Without the three `KME_*_B64` values, the KME and the peer API use plain HTTP. |
+| `IKE_PSK` | for IPsec | `4f9c2a7e1b8d3c6a5e0f9b2d7c4a1e83` | IKEv2 secret, identical on both ends. Generate with `openssl rand -hex 16`. |
+| `LOCAL_TS` | no | `10.1.0.0/24` | Local protected subnet. Default `0.0.0.0/0`. |
+| `REMOTE_TS` | no | `10.2.0.0/24` | Remote protected subnet. Default `0.0.0.0/0`. |
+| `MACSEC_IFACE` | no | `ens4` | Host NIC for MACsec. Empty means no MACsec. |
+| `MACSEC_ADDR` | no | `10.99.0.1/24` | CIDR on the macsec interface. |
+| `K3S_ROLE` | no | `single` | As the k3s-node image. Default `single`. |
+| `K3S_SERVER_URL` `K3S_TOKEN` `K3S_TLS_SAN` | no | leave empty | Only to join or extend a k3s cluster. |
+| `STACK_REF` | no | `main` | Repo branch or tag to fetch. |
+| `STACK_TOKEN` | no | leave empty | Read-only GitHub token, only for a private fork. |
 
 ACL: allow 22, UDP 500/4500, ESP and TCP 8444 from the peer.

@@ -76,8 +76,10 @@ The **Template** column shows where a parameter is used: `light` (first light), 
 | `REMOTE_TS` | both | no | `0.0.0.0/0` | `10.2.0.0/24` | Remote protected subnet. |
 | `MACSEC_IFACE` | both | no | empty (no MACsec) | `ens4` | Host NIC for MACsec. |
 | `MACSEC_ADDR` | both | no | empty (no address) | `10.99.0.1/24` | CIDR on the macsec interface. |
-| `K3S_ROLE` | both | no | `single` | `single` | As the k3s-node image: `single`, `server` or `agent`. |
-| `K3S_SERVER_URL` `K3S_TOKEN` `K3S_TLS_SAN` | both | no | empty | leave empty | Only to join or extend a k3s cluster. |
+| `K3S_ROLE` | both | no | `single` | `single` | `single`: standalone node. `server`: control-plane node. `agent`: k3s worker node that joins an existing cluster; the encryptor is not installed on it. |
+| `K3S_SERVER_URL` | both | no (only used for agent) | empty | `https://10.0.0.5:6443` | URL used by an agent to join the k3s cluster. Empty for `single` or the first `server`. |
+| `K3S_TOKEN` | both | no (only used for agent) | empty | `K10abc123def456::server:789xyz` | Secret used to join the k3s cluster. |
+| `K3S_TLS_SAN` | both | no | empty | `203.0.113.20` | Extra API certificate name or IP. |
 | `STACK_REF` | both | no | `main` | `main` | Repo branch or tag to fetch. Pin a tag for repeatable boots. |
 | `STACK_TOKEN` | both | no | empty | leave empty | Read-only GitHub token, only for a private fork. |
 

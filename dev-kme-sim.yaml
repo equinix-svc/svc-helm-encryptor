@@ -1,5 +1,5 @@
 # LAB ONLY: ETSI 014 KME simulator (random in-memory keys, no QKD, no TLS, no authentication), on the node network
-# (hostNetwork, port 8443). The first-light Day 0 installs it on the master; the slave uses http://<master-ip>:8443.
+# (hostNetwork, port 8443). The BASIC Day 0 installs it on the master; the slave uses http://<master-ip>:8443.
 # Restrict TCP 8443 to the peer in the ACL.
 apiVersion: apps/v1
 kind: Deployment

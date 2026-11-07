@@ -48,44 +48,44 @@ Edit `encryptor.yaml.in` and `src/`, then run `scripts/validate.sh`. It builds `
 
 ## Day 0 templates
 
-Two templates, same structure. Both do what the k3s-node image's own Day 0 does, then on a `single` node or the first `server` create ConfigMap `site` and Secret `site-secrets` in namespace `encryptor` and download `encryptor.yaml` (and `dev-kme-sim.yaml` on the first-light master) into the k3s manifests directory. Render locally with `DAY0_FILE=<file> scripts/render-day0.sh`. Log: `/var/log/day0.log`.
+Two templates, same structure. Both do what the k3s-node image's own Day 0 does, then on a `single` node or the first `server` create ConfigMap `site` and Secret `site-secrets` in namespace `encryptor` and download `encryptor.yaml` (and `dev-kme-sim.yaml` on the BASIC master) into the k3s manifests directory. Render locally with `DAY0_FILE=<file> scripts/render-day0.sh`. Log: `/var/log/day0.log`.
 
-| Template | Use | Portal parameters |
+| Template | Use | Required parameters |
 |---|---|---|
-| [`day0/day0-encryptor-lite.yaml`](day0/day0-encryptor-lite.yaml) | **light** (first light, lab): bring up a pair quickly | 2 required, the rest optional |
-| [`day0/day0-encryptor.yaml`](day0/day0-encryptor.yaml) | **full**: real KME, certificates, per-site values | 6 required, the rest optional |
+| [`day0/day0-encryptor-basic.yaml`](day0/day0-encryptor-basic.yaml) | **BASIC** (lab): bring up a pair quickly with the KME simulator | 2, the rest optional |
+| [`day0/day0-encryptor-advanced.yaml`](day0/day0-encryptor-advanced.yaml) | **ADVANCED**: real KME, certificates, per-site values | 6, the rest optional |
 
 Equinix predefined (both): `hostname` `userName` `publicKey` `adminPwd` `ipAddressWithCidr` `gateway`. Declare every other variable as a custom parameter in the portal.
 
 ### Parameters
 
-The **Template** column shows where a parameter is used: `light` (first light), `full`, or `both`. **Default** is what the template uses when the parameter is left empty (only for parameters that are not required).
+The **BASIC** and **ADVANCED** columns show whether the parameter is required in that template: `yes`, `no`, or `-` (not used). **Default** is what the template uses when a parameter that is not required is left empty.
 
-| Parameter | Template | Required | Default | Example (paste in the portal) | Meaning |
+| Parameter | BASIC | ADVANCED | Default | Example (paste in the portal) | Meaning |
 |---|---|---|---|---|---|
-| `QKD_ROLE` | both | yes | - | `master` | `master` (calls `enc_keys`, initiates IPsec) or `slave` (calls `dec_keys`). In light, the master is SAE-A and also runs the KME simulator; the slave is SAE-B. |
-| `PEER_ADDR` | both | yes | - | `203.0.113.10` | The other appliance's IP, used for IKE and the peer API on 8444. |
-| `SAE_ID` | full | yes | - | `SAE-A` | This appliance's SAE ID on its KME. Light fixes it to `SAE-A` (master) or `SAE-B` (slave). |
-| `PEER_SAE_ID` | full | yes | - | `SAE-B` | The remote appliance's SAE ID. Light fixes it to the opposite of `SAE_ID`. |
-| `KME_URL` | full | yes | - | `https://kme.example.net:8443` | ETSI GS QKD 014 base URL. Light uses `http://127.0.0.1:8443` on the master and `http://<PEER_ADDR>:8443` on the slave. |
-| `IKE_PSK` | both | full: yes, light: no | light: `lab-only-first-light-psk`; full: - | `4f9c2a7e1b8d3c6a5e0f9b2d7c4a1e83` | IKEv2 secret, identical on both ends. The IPsec tunnel is always configured, so full refuses to start without it. Generate with `openssl rand -hex 16`. |
-| `KME_CA_B64` | full | no | empty | `LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t...` | Output of `base64 -w0 ca.pem`. |
-| `KME_CERT_B64` | full | no | empty | `LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t...` | Output of `base64 -w0 client.crt`. |
-| `KME_KEY_B64` | full | no | empty | `LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0t...` | Output of `base64 -w0 client.key`. With all three empty, the KME and the peer API use plain HTTP (light never uses certificates). |
-| `LOCAL_TS` | both | no | `0.0.0.0/0` | `10.1.0.0/24` | Local protected subnet. |
-| `REMOTE_TS` | both | no | `0.0.0.0/0` | `10.2.0.0/24` | Remote protected subnet. |
-| `MACSEC_IFACE` | both | no | empty (no MACsec) | `ens4` | Host NIC for MACsec. |
-| `MACSEC_ADDR` | both | no | empty (no address) | `10.99.0.1/24` | CIDR on the macsec interface. |
-| `K3S_ROLE` | both | no | `single` | `single` | `single`: standalone node. `server`: control-plane node. `agent`: k3s worker node that joins an existing cluster; the encryptor is not installed on it. |
-| `K3S_SERVER_URL` | both | no (only used for agent) | empty | `https://10.0.0.5:6443` | URL used by an agent to join the k3s cluster. Empty for `single` or the first `server`. |
-| `K3S_TOKEN` | both | no (only used for agent) | empty | `K10abc123def456::server:789xyz` | Secret used to join the k3s cluster. |
-| `K3S_TLS_SAN` | both | no | empty | `203.0.113.20` | Extra API certificate name or IP. |
-| `STACK_REF` | both | no | `main` | `main` | Repo branch or tag to fetch. Pin a tag for repeatable boots. |
-| `STACK_TOKEN` | both | no | empty | leave empty | Read-only GitHub token, only for a private fork. |
+| `QKD_ROLE` | yes | yes | - | `master` | `master` (calls `enc_keys`, initiates IPsec) or `slave` (calls `dec_keys`). In BASIC, the master is SAE-A and also runs the KME simulator; the slave is SAE-B. |
+| `PEER_ADDR` | yes | yes | - | `203.0.113.10` | The other appliance's IP, used for IKE and the peer API on 8444. |
+| `SAE_ID` | - | yes | - | `SAE-A` | This appliance's SAE ID on its KME. BASIC fixes it to `SAE-A` (master) or `SAE-B` (slave). |
+| `PEER_SAE_ID` | - | yes | - | `SAE-B` | The remote appliance's SAE ID. BASIC fixes it to the opposite of the local one. |
+| `KME_URL` | - | yes | - | `https://kme.example.net:8443` | ETSI GS QKD 014 base URL. BASIC uses `http://127.0.0.1:8443` on the master and `http://<PEER_ADDR>:8443` on the slave. |
+| `IKE_PSK` | no | yes | BASIC: `lab-only-basic-psk` | `4f9c2a7e1b8d3c6a5e0f9b2d7c4a1e83` | IKEv2 secret, identical on both ends. The IPsec tunnel is always configured, so ADVANCED refuses to start without it. Generate with `openssl rand -hex 16`. |
+| `KME_CA_B64` | - | no | empty | `LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t...` | Output of `base64 -w0 ca.pem`. |
+| `KME_CERT_B64` | - | no | empty | `LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t...` | Output of `base64 -w0 client.crt`. |
+| `KME_KEY_B64` | - | no | empty | `LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0t...` | Output of `base64 -w0 client.key`. With all three empty, the KME and the peer API use plain HTTP (BASIC never uses certificates). |
+| `LOCAL_TS` | no | no | `0.0.0.0/0` | `10.1.0.0/24` | Local protected subnet. |
+| `REMOTE_TS` | no | no | `0.0.0.0/0` | `10.2.0.0/24` | Remote protected subnet. |
+| `MACSEC_IFACE` | no | no | empty (no MACsec) | `ens4` | Host NIC for MACsec. |
+| `MACSEC_ADDR` | no | no | empty (no address) | `10.99.0.1/24` | CIDR on the macsec interface. |
+| `K3S_ROLE` | no | no | `single` | `single` | `single`: standalone node. `server`: control-plane node. `agent`: k3s worker node that joins an existing cluster; the encryptor is not installed on it. |
+| `K3S_SERVER_URL` | no (only used for agent) | no (only used for agent) | empty | `https://10.0.0.5:6443` | URL used by an agent to join the k3s cluster. Empty for `single` or the first `server`. |
+| `K3S_TOKEN` | no (only used for agent) | no (only used for agent) | empty | `K10abc123def456::server:789xyz` | Secret used to join the k3s cluster. |
+| `K3S_TLS_SAN` | no | no | empty | `203.0.113.20` | Extra API certificate name or IP. |
+| `STACK_REF` | no | no | `main` | `main` | Repo branch or tag to fetch. Pin a tag for repeatable boots. |
+| `STACK_TOKEN` | no | no | empty | leave empty | Read-only GitHub token, only for a private fork. |
 
-Light uses plain HTTP for the KME and the peer API. Its simulator gives random keys, **not QKD**, with no authentication.
+BASIC uses plain HTTP for the KME and the peer API. Its simulator gives random keys, **not QKD**, with no authentication.
 
 | Template | ACL |
 |---|---|
-| light | allow 22, UDP 500/4500, ESP, and TCP 8443 and 8444 from the peer only |
-| full | allow 22, UDP 500/4500, ESP and TCP 8444 from the peer |
+| BASIC | allow 22, UDP 500/4500, ESP, and TCP 8443 and 8444 from the peer only |
+| ADVANCED | allow 22, UDP 500/4500, ESP and TCP 8444 from the peer |

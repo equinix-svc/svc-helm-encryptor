@@ -1,6 +1,6 @@
 #cloud-config
-# FIRST LIGHT Day 0 (lab): the smallest set of portal parameters to bring up a pair of QKD encryptors for testing.
-# Same template family as day0-encryptor.yaml (full parameters), with defaults instead of per-site values:
+# BASIC Day 0 (lab): the smallest set of portal parameters to bring up a pair of QKD encryptors for testing.
+# Same template family as day0-encryptor-advanced.yaml (ADVANCED), with defaults instead of per-site values:
 #   - SAE IDs are fixed: master = SAE-A, slave = SAE-B
 #   - the KME is the ETSI 014 SIMULATOR (random keys, NOT QKD), run on the master node; the slave points at it
 #   - no certificates: KME and peer API use plain HTTP, so restrict TCP 8443 and 8444 in the ACL to the peer only
@@ -87,14 +87,14 @@ write_files:
       for v in QKD_ROLE PEER_ADDR; do
         [ -n "${!v:-}" ] || { echo "missing required parameter $v"; exit 1; }
       done
-      # first-light defaults: fixed SAE IDs, KME simulator on the master
+      # BASIC defaults: fixed SAE IDs, KME simulator on the master
       INSTALL_KME_SIM=no
       case "$QKD_ROLE" in
         master) SAE_ID=SAE-A; PEER_SAE_ID=SAE-B; KME_URL=http://127.0.0.1:8443; INSTALL_KME_SIM=yes ;;
         slave)  SAE_ID=SAE-B; PEER_SAE_ID=SAE-A; KME_URL="http://$PEER_ADDR:8443" ;;
         *) echo "QKD_ROLE must be master|slave"; exit 1 ;;
       esac
-      IKE_PSK="${IKE_PSK:-lab-only-first-light-psk}"
+      IKE_PSK="${IKE_PSK:-lab-only-basic-psk}"
       KME_CA_B64=""; KME_CERT_B64=""; KME_KEY_B64=""
       NODE_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')"
 

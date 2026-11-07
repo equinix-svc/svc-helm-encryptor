@@ -3,7 +3,8 @@
 #   strongswan : IPsec IKEv2 tunnels, QKD key injected as RFC 8784 PPK
 #   macsec     : MACsec (IEEE 802.1AE) on a host NIC, QKD key as MKA CAK (wpa_supplicant)
 #   qkd-exchange  : KME client + peer API; also rotates SSH key pairs (written under /var/lib/encryptor/ssh)
-# Site-specific Secret/ConfigMap (site, site-secrets) are NOT in this file: Day 0 creates them (see README.md).
+# Site-specific Secret/ConfigMap (site, site-secrets) are NOT in this file: Day 0 creates them. The KME client
+# certificates (Secret kme-tls) are loaded after boot, never through Day 0 (see README.md).
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -43,14 +44,14 @@ spec:
           livenessProbe: { tcpSocket: { port: 8444 }, periodSeconds: 30 }
           volumeMounts:
             - { name: site, mountPath: /etc/qkd/config.json, subPath: config.json, readOnly: true }
-            - { name: site-secrets, mountPath: /etc/qkd/tls, readOnly: true }
+            - { name: kme-tls, mountPath: /etc/qkd/tls, readOnly: true }
             - { name: swanctl-conf-d, mountPath: /swanctl/conf.d }
             - { name: macsec, mountPath: /macsec }
             - { name: ssh, mountPath: /ssh }
           resources: { requests: { cpu: 20m, memory: 48Mi }, limits: { memory: 128Mi } }
       volumes:
         - { name: site, configMap: { name: site } }
-        - { name: site-secrets, secret: { secretName: site-secrets, defaultMode: 0400 } }
+        - { name: kme-tls, secret: { secretName: kme-tls, optional: true, defaultMode: 0400 } }
         - name: swanctl-main
           secret: { secretName: site-secrets, items: [{ key: swanctl.conf, path: swanctl.conf }], defaultMode: 0400 }
         - { name: swanctl-conf-d, emptyDir: { medium: Memory } }     # QKD keys stay in RAM, never on disk

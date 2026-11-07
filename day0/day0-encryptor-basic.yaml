@@ -4,16 +4,15 @@
 #   - SAE IDs are fixed: master = SAE-A, slave = SAE-B
 #   - the KME is the ETSI 014 SIMULATOR (random keys, NOT QKD), run on the master node; the slave points at it
 #   - no certificates: KME and peer API use plain HTTP, so restrict TCP 8443 and 8444 in the ACL to the peer only
-#   - IKE_PSK defaults to a public lab value
 # Placeholders use the Equinix inline syntax (case-sensitive names).
 #   Equinix predefined: hostname userName publicKey adminPwd ipAddressWithCidr gateway
 #   Custom parameters : K3S_ROLE K3S_SERVER_URL K3S_TOKEN K3S_TLS_SAN   (as the k3s-node image, all optional)
 #     QKD_ROLE      master | slave                                       (required)
+#     IKE_PSK       IKEv2 secret, identical on both ends                 (required)
 #     PEER_ADDR     the other appliance's IP                             (required)
 #     MACSEC_IFACE  host NIC for MACsec, e.g. ens4 (empty = no MACsec)  (optional)
 #     MACSEC_ADDR   CIDR on the macsec interface, e.g. 10.99.0.1/24      (optional)
 #     LOCAL_TS REMOTE_TS  protected subnets (default 0.0.0.0/0)          (optional)
-#     IKE_PSK       IKEv2 secret, identical on both ends                 (optional, lab default)
 #     STACK_REF STACK_TOKEN  repo branch/tag (default main), token only for a private fork (optional)
 # Equinix injects a STATIC address (no DHCP), so this file configures the network itself.
 # Roles (K3S_ROLE): single | server | agent  (the encryptor is only installed on single / first server)
@@ -84,7 +83,7 @@ write_files:
       MAN=/var/lib/rancher/k3s/server/manifests
       REF="${STACK_REF:-main}"
       NS=encryptor
-      for v in QKD_ROLE PEER_ADDR; do
+      for v in QKD_ROLE PEER_ADDR IKE_PSK; do
         [ -n "${!v:-}" ] || { echo "missing required parameter $v"; exit 1; }
       done
       # BASIC defaults: fixed SAE IDs, KME simulator on the master
@@ -94,15 +93,11 @@ write_files:
         slave)  SAE_ID=SAE-B; PEER_SAE_ID=SAE-A; KME_URL="http://$PEER_ADDR:8443" ;;
         *) echo "QKD_ROLE must be master|slave"; exit 1 ;;
       esac
-      IKE_PSK="${IKE_PSK:-lab-only-basic-psk}"
-      KME_CA_B64=""; KME_CERT_B64=""; KME_KEY_B64=""
       NODE_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')"
 
       W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
-      for f in CA CERT KEY; do v="KME_${f}_B64"; [ -n "${!v:-}" ] && printf '%s' "${!v}" | base64 -d > "$W/$f.pem"; done
-      TLSJ='"ca":"/etc/qkd/tls/ca.crt","cert":"/etc/qkd/tls/tls.crt","key":"/etc/qkd/tls/tls.key"'
-      SCHEME=https
-      [ -s "$W/CA.pem" ] || { TLSJ='"ca":null'; SCHEME=http; echo "no certificates: KME and peer API use plain HTTP (lab only)"; }
+      # BASIC uses the KME simulator over plain HTTP: no certificates
+      SCHEME=http; TLSJ='"ca":null'
 
       # --- exchange config: three consumers, same role on all of them
       INT=3600
@@ -158,9 +153,7 @@ write_files:
       $K create namespace $NS --dry-run=client -o yaml | $K apply -f -
       $K -n $NS create configmap site --from-file=config.json="$W/config.json" --from-file=macsec.env="$W/macsec.env" \
         --dry-run=client -o yaml | $K apply -f -
-      ARGS=(--from-file=swanctl.conf="$W/swanctl.conf")
-      [ -s "$W/CA.pem" ] && ARGS+=(--from-file=ca.crt="$W/CA.pem" --from-file=tls.crt="$W/CERT.pem" --from-file=tls.key="$W/KEY.pem")
-      $K -n $NS create secret generic site-secrets "${ARGS[@]}" --dry-run=client -o yaml | $K apply -f -
+      $K -n $NS create secret generic site-secrets --from-file=swanctl.conf="$W/swanctl.conf" --dry-run=client -o yaml | $K apply -f -
 
       AUTH=()
       [ -n "${STACK_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $STACK_TOKEN")

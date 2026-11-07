@@ -8,9 +8,8 @@
 #     SAE_ID        this appliance's SAE ID on its KME                 (required)
 #     PEER_SAE_ID   the remote appliance's SAE ID                      (required)
 #     QKD_ROLE      master (calls enc_keys, initiates IPsec) | slave   (required)
-#     KME_URL       https://kme.local:8443 (ETSI GS QKD 014 base URL)  (required)
+#     KME_URL       ETSI GS QKD 014 base URL; https:// = mutual TLS, certificates are loaded AFTER boot (README section 4)  (required)
 #     PEER_ADDR     remote appliance IP (IKE, peer API on 8444)        (required)
-#     KME_CA_B64 KME_CERT_B64 KME_KEY_B64   base64 PEM: CA, client cert and key; used for the KME and the peer API
 #     IKE_PSK       IKEv2 authentication secret, identical on both ends (required)
 #     LOCAL_TS REMOTE_TS   protected subnets, e.g. 10.1.0.0/24 and 10.2.0.0/24
 #     MACSEC_IFACE  host NIC to protect with MACsec, e.g. ens4 (empty = no MACsec)
@@ -71,9 +70,6 @@ write_files:
       QKD_ROLE='[(${QKD_ROLE})]'
       KME_URL='[(${KME_URL})]'
       PEER_ADDR='[(${PEER_ADDR})]'
-      KME_CA_B64='[(${KME_CA_B64})]'
-      KME_CERT_B64='[(${KME_CERT_B64})]'
-      KME_KEY_B64='[(${KME_KEY_B64})]'
       IKE_PSK='[(${IKE_PSK})]'
       LOCAL_TS='[(${LOCAL_TS})]'
       REMOTE_TS='[(${REMOTE_TS})]'
@@ -100,10 +96,12 @@ write_files:
       NODE_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')"
 
       W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
-      for f in CA CERT KEY; do v="KME_${f}_B64"; [ -n "${!v:-}" ] && printf '%s' "${!v}" | base64 -d > "$W/$f.pem"; done
-      TLSJ='"ca":"/etc/qkd/tls/ca.crt","cert":"/etc/qkd/tls/tls.crt","key":"/etc/qkd/tls/tls.key"'
-      SCHEME=https
-      [ -s "$W/CA.pem" ] || { TLSJ='"ca":null'; SCHEME=http; echo "no certificates: KME and peer API use plain HTTP (lab only)"; }
+      # https:// KME = mutual TLS. The certificates are NOT passed through Day 0: load them after boot into Secret kme-tls
+      # (README section 4); qkd-exchange waits for them. The same files protect the peer API.
+      case "$KME_URL" in
+        https://*) SCHEME=https; TLSJ='"ca":"/etc/qkd/tls/ca.crt","cert":"/etc/qkd/tls/tls.crt","key":"/etc/qkd/tls/tls.key"' ;;
+        *)         SCHEME=http;  TLSJ='"ca":null'; echo "KME_URL is not https: KME and peer API use plain HTTP (lab only)" ;;
+      esac
 
       # --- exchange config: three consumers, same role on all of them
       INT=3600
@@ -159,9 +157,7 @@ write_files:
       $K create namespace $NS --dry-run=client -o yaml | $K apply -f -
       $K -n $NS create configmap site --from-file=config.json="$W/config.json" --from-file=macsec.env="$W/macsec.env" \
         --dry-run=client -o yaml | $K apply -f -
-      ARGS=(--from-file=swanctl.conf="$W/swanctl.conf")
-      [ -s "$W/CA.pem" ] && ARGS+=(--from-file=ca.crt="$W/CA.pem" --from-file=tls.crt="$W/CERT.pem" --from-file=tls.key="$W/KEY.pem")
-      $K -n $NS create secret generic site-secrets "${ARGS[@]}" --dry-run=client -o yaml | $K apply -f -
+      $K -n $NS create secret generic site-secrets --from-file=swanctl.conf="$W/swanctl.conf" --dry-run=client -o yaml | $K apply -f -
 
       AUTH=()
       [ -n "${STACK_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $STACK_TOKEN")
@@ -292,7 +288,7 @@ write_files:
       if [ "$UNIT" = k3s ] && [ -z "$K3S_SERVER_URL" ]; then
         echo "installing the encryptor stack"
         SAE_ID="$SAE_ID" PEER_SAE_ID="$PEER_SAE_ID" QKD_ROLE="$QKD_ROLE" KME_URL="$KME_URL" PEER_ADDR="$PEER_ADDR" \
-        KME_CA_B64="$KME_CA_B64" KME_CERT_B64="$KME_CERT_B64" KME_KEY_B64="$KME_KEY_B64" IKE_PSK="$IKE_PSK" \
+        IKE_PSK="$IKE_PSK" \
         LOCAL_TS="$LOCAL_TS" REMOTE_TS="$REMOTE_TS" MACSEC_IFACE="$MACSEC_IFACE" MACSEC_ADDR="$MACSEC_ADDR" \
         STACK_REF="$STACK_REF" STACK_TOKEN="$STACK_TOKEN" /usr/local/bin/day0-encryptor.sh \
           || echo "encryptor install failed: see this log"

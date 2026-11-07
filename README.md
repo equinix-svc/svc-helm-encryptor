@@ -29,7 +29,7 @@ One master/slave pair rotates keys. The master requests keys from its KME, sends
 | 1. VM image | Plain `k3s-node` image (`k3s-node.qcow2`) from [svc-ne-byoi-builder](https://github.com/equinix-svc/svc-ne-byoi-builder). Portal settings: `docs/portal-values.md` in that repo. |
 | 2. Container images | `ghcr.io/equinix-svc/svc-helm-encryptor/{qkd-exchange,strongswan,macsec}:0.1.0`, built by the `images` GitHub Actions workflow on every change under `src/` (or by hand with `scripts/push-images.sh`). The packages must be public. Required before the first boot. |
 | 3. Day 0 file | [`day0/day0-encryptor-basic.yaml`](day0/day0-encryptor-basic.yaml) for a first test, [`day0/day0-encryptor-advanced.yaml`](day0/day0-encryptor-advanced.yaml) for a real KME. |
-| 4. Parameters | Two required for BASIC, see below. Full list: [Day 0 templates](#3-day-0-templates). |
+| 4. Parameters | Three required for BASIC, see below. Full list: [Day 0 templates](#3-day-0-templates). Certificates for a real KME are loaded after boot: [section 4](#4-load-kme-certificates-after-boot). |
 
 BASIC, one appliance of each role (the master also runs the KME simulator):
 
@@ -37,6 +37,7 @@ BASIC, one appliance of each role (the master also runs the KME simulator):
 |---|---|---|
 | `QKD_ROLE` | `master` | `slave` |
 | `PEER_ADDR` | the slave's IP | the master's IP |
+| `IKE_PSK` | the same secret, e.g. `openssl rand -hex 16` | the same secret |
 
 Optional: `MACSEC_IFACE` (e.g. `ens4`) and `LOCAL_TS` / `REMOTE_TS` (e.g. `10.1.0.0/24` / `10.2.0.0/24`). ACL: allow 22, UDP 500/4500, ESP, TCP 8443 and 8444 from the peer.
 
@@ -46,8 +47,8 @@ Two templates, same structure. Both do what the k3s-node image's own Day 0 does,
 
 | Template | Use | Required parameters |
 |---|---|---|
-| [`day0/day0-encryptor-basic.yaml`](day0/day0-encryptor-basic.yaml) | **BASIC** (lab): bring up a pair quickly with the KME simulator | 2, the rest optional |
-| [`day0/day0-encryptor-advanced.yaml`](day0/day0-encryptor-advanced.yaml) | **ADVANCED**: real KME, certificates, per-site values | 6, the rest optional |
+| [`day0/day0-encryptor-basic.yaml`](day0/day0-encryptor-basic.yaml) | **BASIC** (lab): bring up a pair quickly with the KME simulator | 3, the rest optional |
+| [`day0/day0-encryptor-advanced.yaml`](day0/day0-encryptor-advanced.yaml) | **ADVANCED**: real KME, per-site values | 6, the rest optional |
 
 Equinix predefined (both): `hostname` `userName` `publicKey` `adminPwd` `ipAddressWithCidr` `gateway`. Declare every other variable as a custom parameter in the portal.
 
@@ -61,11 +62,8 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 | `PEER_ADDR` | yes | yes | - | `203.0.113.10` | The other appliance's IP, used for IKE and the peer API on 8444. |
 | `SAE_ID` | - | yes | - | `SAE-A` | This appliance's SAE ID on its KME. BASIC fixes it to `SAE-A` (master) or `SAE-B` (slave). |
 | `PEER_SAE_ID` | - | yes | - | `SAE-B` | The remote appliance's SAE ID. BASIC fixes it to the opposite of the local one. |
-| `KME_URL` | - | yes | - | `https://kme.example.net:8443` | ETSI GS QKD 014 base URL. BASIC uses `http://127.0.0.1:8443` on the master and `http://<PEER_ADDR>:8443` on the slave. |
-| `IKE_PSK` | no | yes | BASIC: `lab-only-basic-psk` | `4f9c2a7e1b8d3c6a5e0f9b2d7c4a1e83` | IKEv2 secret, identical on both ends. The IPsec tunnel is always configured, so ADVANCED refuses to start without it. Generate with `openssl rand -hex 16`. |
-| `KME_CA_B64` | - | no | empty | `LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t...` | Output of `base64 -w0 ca.pem`. |
-| `KME_CERT_B64` | - | no | empty | `LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t...` | Output of `base64 -w0 client.crt`. |
-| `KME_KEY_B64` | - | no | empty | `LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0t...` | Output of `base64 -w0 client.key`. With all three empty, the KME and the peer API use plain HTTP (BASIC never uses certificates). |
+| `KME_URL` | - | yes | - | `https://kme.example.net:8443` | ETSI GS QKD 014 base URL. `https://` means mutual TLS: the certificates are loaded after boot (section 4). BASIC uses `http://127.0.0.1:8443` on the master and `http://<PEER_ADDR>:8443` on the slave. |
+| `IKE_PSK` | yes | yes | - | `4f9c2a7e1b8d3c6a5e0f9b2d7c4a1e83` | IKEv2 secret, identical on both ends, never stored in the repo. The IPsec tunnel is always configured, so both templates refuse to start without it. Generate with `openssl rand -hex 16`. |
 | `LOCAL_TS` | no | no | `0.0.0.0/0` | `10.1.0.0/24` | Local protected subnet. |
 | `REMOTE_TS` | no | no | `0.0.0.0/0` | `10.2.0.0/24` | Remote protected subnet. |
 | `MACSEC_IFACE` | no | no | empty (no MACsec) | `ens4` | Host NIC for MACsec. |
@@ -77,21 +75,43 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 | `STACK_REF` | no | no | `main` | `main` | Repo branch or tag to fetch. Pin a tag for repeatable boots. |
 | `STACK_TOKEN` | no | no | empty | leave empty | Read-only GitHub token, only for a private fork. |
 
-BASIC uses plain HTTP for the KME and the peer API. Its simulator gives random keys, **not QKD**, with no authentication.
+BASIC uses plain HTTP for the KME and the peer API. ADVANCED does too when `KME_URL` is `http://`. Its simulator gives random keys, **not QKD**, with no authentication.
 
 | Template | ACL |
 |---|---|
 | BASIC | allow 22, UDP 500/4500, ESP, and TCP 8443 and 8444 from the peer only |
 | ADVANCED | allow 22, UDP 500/4500, ESP and TCP 8444 from the peer |
 
-## 4. What was tested
+## 4. Load KME certificates after boot
+
+The KME client certificates are **not** Day 0 parameters, so the private key never goes through the portal. They are loaded into Secret `kme-tls` once the node is up. Used with ADVANCED when `KME_URL` is `https://`; the same files also protect the peer API (port 8444).
+
+| File | Content |
+|---|---|
+| `ca.crt` | CA that signed the KME certificate and the peer appliance's certificate |
+| `tls.crt` | This appliance's client certificate (the KME maps it to the SAE ID). It is also the server certificate of the peer API, so its SAN must contain the appliance IP |
+| `tls.key` | Its private key |
+
+1. Copy the three PEM files to the node (`scp`).
+2. Create the Secret:
+   ```bash
+   sudo k3s kubectl -n encryptor create secret generic kme-tls \
+     --from-file=ca.crt=ca.pem --from-file=tls.crt=client.crt --from-file=tls.key=client.key
+   ```
+3. Check: `sudo k3s kubectl -n encryptor logs deploy/encryptor -c qkd-exchange --tail=20`. Until the Secret exists the log says `waiting for KME certificates`. Then `qkd-exchange` starts by itself (the Secret volume refreshes within a minute or two) and no restart is needed.
+4. Delete the PEM files from the node: `shred -u ca.pem client.crt client.key`.
+
+To rotate them, update the Secret (`... --dry-run=client -o yaml | sudo k3s kubectl apply -f -`) and run `sudo k3s kubectl -n encryptor rollout restart deploy/encryptor`.
+
+## 5. What was tested
 
 - The exchange service and simulator ran end to end with a master and a slave. IPsec and MACsec key files matched on both sides (only the MKA priority differs), and the SSH public key passed its authentication check and was installed.
 - Two strongSwan containers established IKEv2 with the PPK. A wrong PPK failed with `AUTH_FAILED`.
 - Two `macsec` containers joined by a veth pair established MKA with GCM-AES-256 from a config generated by qkd-exchange. Ping passed and the wire carried 802.1AE frames.
+- The peer API ran over mutual TLS with generated certificates: `qkd-exchange` waited until the certificates existed, accepted the valid client, and refused a client with no certificate and one from another CA.
 - The three images build, the manifest parses, and Day 0 renders and passes a shell syntax check.
 
-## 5. Findings and limits
+## 6. Findings and limits
 
 - **MACsec on Equinix vNICs:** the virtual switch must pass EAPOL (`01:80:c2:00:00:03`) and EtherType `0x88e5` frames between the two appliances. This is untested. Use a dedicated NIC (`MACSEC_IFACE`), not the management one.
 - **MACsec image:** 256-bit MACsec needs `wpa_supplicant` 2.11 (`macsec_csindex`). Debian trixie ships 2.10 and Alpine has no MACsec driver, so the image uses `debian:sid-slim`. Pin it by digest once validated.
@@ -99,11 +119,12 @@ BASIC uses plain HTTP for the KME and the peer API. Its simulator gives random k
 - **PPK timing:** a new PPK only takes effect at the next IKE reauthentication, not on child-SA rekeys.
 - **PPK ID:** it is fixed, so a brief key-switch window can fail an authentication. That is retried.
 - **SSH:** QKD can't plug into the SSH transport itself. qkd-exchange only rotates key pairs, and you still need to wire them into `sshd` or a CA.
-- **Untested:** a real KME (certificate and SAE ID mapping vary by vendor), the peer API over mTLS, and deployment on k3s.
+- **Untested:** a real KME (certificate and SAE ID mapping vary by vendor) and deployment on k3s.
 - **IKE authentication:** it uses a shared secret (`IKE_PSK`) for now. Certificates would be better for production.
-- **Day 0 size:** the templates are about 14 KB. The portal limit is 20,000 characters, and the three base64 certificate parameters can push the rendered text over it.
+- **Day 0 size:** the templates are about 14 KB, under the portal limit of 20,000 characters. No certificate goes through Day 0.
+- **Secrets in Day 0:** the Day 0 files hold no secret. `IKE_PSK` (and `K3S_TOKEN` for an agent) still travel as portal parameters and end up in a Kubernetes Secret on the node, readable by root.
 - **Images:** `encryptor.yaml` pulls `ghcr.io/equinix-svc/svc-helm-encryptor/{qkd-exchange,strongswan,macsec}:0.1.0`. Build them from `src/<name>/` and push them to that registry (or change the names in `encryptor.yaml.in`) before the first boot. A private registry needs a pull secret.
 
-## 6. Build and validate
+## 7. Build and validate
 
 Edit `encryptor.yaml.in` and `src/`, then run `scripts/validate.sh`. Pushing a change under `src/` rebuilds and publishes the images (workflow `images`). It builds `encryptor.yaml` and the images and checks Day 0. Commit both the sources and the generated file.

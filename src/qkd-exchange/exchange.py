@@ -215,8 +215,18 @@ def serve_peer(ex):
     srv.serve_forever()
 
 
+def wait_for_files(cfg):
+    """With https the KME/peer certificates are loaded after boot (Secret kme-tls): wait until they exist."""
+    paths = [v for sec in ("kme", "peer") for k, v in cfg[sec].items() if k in ("ca", "cert", "key") and v]
+    while not all(os.path.exists(p) for p in paths):
+        log.warning("waiting for KME certificates: %s (see README: load them after boot)",
+                    ", ".join(p for p in paths if not os.path.exists(p)))
+        time.sleep(10)
+
+
 def run(path):
     cfg = json.load(open(path))
+    wait_for_files(cfg)
     ex = Exchange(cfg)
     threading.Thread(target=serve_peer, args=(ex,), daemon=True).start()
     for c in cfg["consumers"]:

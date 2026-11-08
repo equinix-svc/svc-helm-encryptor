@@ -121,7 +121,8 @@ The master serves a small web console: the appliance pair as two nodes joined by
 | Open | `ssh -L 8080:localhost:8080 <user>@<node>`, then `http://localhost:8080` |
 | Master side | SAE, KME, peer SAE; consumers IPsec, MACsec, SSH with interval, sequence, last key age and state |
 | Slave side | greyed until you click "Link slave". The peer address is read-only, taken from the portal parameter `PEER_ADDR`. Linking checks that the peer answers on its API, then shows the slave's SAE and KME |
-| Fabric connection | a text label stored on the node (`/var/lib/encryptor/state/console.json`) and shown on the slave card. This node has no Fabric credentials, so it never reads the connection's real state |
+| Fabric connection | a text label stored on the node (`/var/lib/encryptor/state/console.json`) and shown on the slave card. The service token and the virtual connection itself are created outside the node: it has no Fabric credentials and never reads the connection's real state |
+| Test the slave side | button under the Fabric label, usable before linking: 5 TCP connects to the slave's peer API port (loss; min, median and max latency), then the peer API call itself (certificates included in ADVANCED). The result is green when both pass |
 | Link line | IPsec state and uptime, number of child SAs, latency, age of the last key |
 | Latency | median TCP connect time from the master to the peer API port (8444), measured every 5 seconds. It needs no ping tool or root |
 | IPsec and MACsec state | the `strongswan` and `macsec` containers publish them to a shared in-memory volume every 5 to 10 seconds; older than 40 seconds counts as unknown |

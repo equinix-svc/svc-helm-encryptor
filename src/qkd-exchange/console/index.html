@@ -43,6 +43,8 @@
   .btn { margin:14px 0 0 32px; border:1px solid #fff; background:transparent; color:#fff; padding:10px 14px; font:600 14px var(--font); cursor:pointer; width:calc(100% - 32px); }
   .btn:hover:not(:disabled) { background:rgba(255,255,255,.1); } .btn:disabled { opacity:.45; cursor:default; }
   .btn.red { background:var(--red); border-color:var(--red); } .btn.red:hover:not(:disabled) { background:var(--red-dark); }
+  .testout { margin:10px 0 0 32px; padding:10px 12px; background:var(--side-dark); border-left:3px solid #55575c; font-size:12px; line-height:1.6; color:var(--side-text); }
+  .testout.ok { border-color:var(--green); } .testout.bad { border-color:var(--red); }
   .msg { margin:8px 0 0 32px; font-size:12px; color:var(--orange); }
   main { flex:1; position:relative; display:flex; flex-direction:column; min-width:0; overflow-y:auto;
          background:radial-gradient(1200px 600px at 70% 10%, #3b3640 0%, var(--main) 60%); }
@@ -92,10 +94,12 @@
       <h2>Link the slave</h2>
       <div class="field"><label for="peer">Peer address (from the portal parameter PEER_ADDR)</label><input id="peer" readonly></div>
       <div class="field"><label for="fabric">Fabric connection (label, e.g. fred-vc-paris-lyon)</label><input id="fabric" placeholder="optional label"></div>
+      <button class="btn" id="testBtn" type="button">Test the slave side</button>
+      <div class="testout" id="testOut" hidden></div>
       <button class="btn red" id="linkBtn" type="button">Link slave</button>
       <button class="btn" id="unlinkBtn" type="button" hidden>Unlink</button>
       <div class="msg" id="linkMsg"></div>
-      <div class="kv" style="margin-top:12px">The Fabric label is only stored and displayed: this node has no Fabric credentials, so it does not read the connection's real state.</div>
+      <div class="kv" style="margin-top:12px">The Fabric label is only stored and displayed: this node has no Fabric credentials, so it does not read the connection's real state. "Test the slave side" checks that the slave answers over the connection: TCP to its peer API (loss, latency) and the API call itself.</div>
     </div>
   </aside>
 
@@ -173,6 +177,15 @@ async function post(path, body) {
 $('#linkBtn').onclick = async () => {
   $('#linkMsg').textContent = 'Checking the peer...'; const [ok, d] = await post('api/link', {fabric: $('#fabric').value});
   $('#linkMsg').textContent = ok ? '' : (d.error || 'Link failed'); load();
+};
+$('#testBtn').onclick = async () => {
+  const o = $('#testOut'); o.hidden = false; o.className = 'testout'; o.textContent = 'Testing ' + (S ? S.peer_addr : '') + '...';
+  $('#testBtn').disabled = true; const [, d] = await post('api/test'); $('#testBtn').disabled = false;
+  if (!d.tcp) { o.className = 'testout bad'; o.textContent = d.error || 'Test failed'; return; }
+  const t = d.tcp, lines = [d.address + ' - ' + (d.ok ? 'reachable' : 'NOT reachable'),
+    'TCP ' + t.ok + '/' + t.sent + ' answered (' + t.loss_pct + '% loss)' + (t.median != null ? ' · ' + t.min + ' / ' + t.median + ' / ' + t.max + ' ms (min / median / max)' : ''),
+    d.peer_api ? (d.peer_api.ok ? 'peer API ok · slave ' + d.peer_api.sae_id + ' · ' + d.peer_api.ms + ' ms' : 'peer API failed: ' + d.peer_api.error) : 'peer API not tried'];
+  o.className = 'testout ' + (d.ok ? 'ok' : 'bad'); o.replaceChildren(...lines.flatMap((x, i) => i ? [document.createElement('br'), x] : [x]));
 };
 $('#unlinkBtn').onclick = async () => { await post('api/unlink'); $('#linkMsg').textContent = ''; load(); };
 $('#rotate').onclick = async () => { busy = true; $('#rotate').disabled = true; await post('api/rotate'); setTimeout(() => { busy = false; load(); }, 2500); };

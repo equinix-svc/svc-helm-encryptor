@@ -263,6 +263,22 @@ def tcp_latency_ms(host, port, n=3):
     return round(sorted(vals)[len(vals) // 2], 1) if vals else None
 
 
+def probe(host, port, n=5):
+    """Reachability of the slave side: TCP connects to the peer API port (loss and latency), then the API call itself."""
+    ms = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        try:
+            with socket.create_connection((host, port), timeout=2):
+                ms.append((time.perf_counter() - t0) * 1000)
+        except OSError:
+            pass
+        time.sleep(0.1)
+    ms.sort()
+    return {"sent": n, "ok": len(ms), "loss_pct": round(100 * (n - len(ms)) / n),
+            "min": round(ms[0], 1) if ms else None, "median": round(ms[len(ms) // 2], 1) if ms else None, "max": round(ms[-1], 1) if ms else None}
+
+
 class Console:
     def __init__(self, ex):
         self.ex, self.cfg = ex, ex.cfg.get("console", {})
@@ -309,6 +325,19 @@ class Console:
             return 502, {"error": "peer %s:%s does not answer (%s)" % (self.peer_host, self.peer_port, e)}
         self.state.update(linked=True, fabric=fabric); self.save()
         return 200, {"ok": True, "peer": peer}
+
+    def test(self, body):
+        """Test button: TCP reachability and latency to the slave, then its peer API (certificates included in ADVANCED)."""
+        out = {"address": "%s:%s" % (self.peer_host, self.peer_port), "tcp": probe(self.peer_host, self.peer_port), "peer_api": None}
+        if out["tcp"]["ok"]:
+            t0 = time.perf_counter()
+            try:
+                p = self.ex.peer_get("/v1/status")
+                out["peer_api"] = {"ok": True, "sae_id": p.get("sae_id"), "ms": round((time.perf_counter() - t0) * 1000)}
+            except Exception as e:  # noqa: BLE001
+                out["peer_api"] = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+        out["ok"] = bool(out["tcp"]["ok"]) and bool(out["peer_api"] and out["peer_api"]["ok"])
+        return 200, out
 
     def unlink(self):
         self.state.update(linked=False); self.save()
@@ -360,7 +389,7 @@ def serve_console(con):
                 return self._send(403, {"error": "missing X-Console header"})
             try:
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
-                fn = {"/api/link": lambda: con.link(body), "/api/unlink": con.unlink, "/api/rotate": con.rotate_now}.get(self.path)
+                fn = {"/api/link": lambda: con.link(body), "/api/unlink": con.unlink, "/api/test": lambda: con.test(body), "/api/rotate": con.rotate_now}.get(self.path)
                 if not fn:
                     return self._send(404, {"error": "not found"})
                 code, out = fn()

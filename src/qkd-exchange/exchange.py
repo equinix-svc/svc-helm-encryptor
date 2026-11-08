@@ -9,7 +9,7 @@ key_ID in-band (here: the peer API); the *slave* SAE calls dec_keys(master_SAE_I
 Rotation is two-phase so both ends switch together: stage (slave fetches and holds) -> commit (both apply).
 Stdlib only, plus `cryptography` for the ssh consumer.
 """
-import argparse, base64, hashlib, hmac, json, logging, os, ssl, sys, tempfile, threading, time, uuid
+import argparse, base64, hashlib, hmac, json, logging, os, re, socket, ssl, sys, tempfile, threading, time, uuid
 import urllib.error, urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -121,6 +121,7 @@ class Exchange:
         self.staged = {}   # (name, seq) -> (key, key_id)
         self.state = {n: {"seq": 0, "last_ok": None, "last_error": None} for n in self.cons}
         self.lock = threading.Lock()
+        self.wake = {n: threading.Event() for n in self.cons}
 
     # master side
     def rotate(self, c):
@@ -142,6 +143,11 @@ class Exchange:
             if r.status != 200:
                 raise RuntimeError("peer %s -> %s" % (path, r.status))
 
+    def peer_get(self, path, timeout=3):
+        req = urllib.request.Request(self.cfg["peer"]["url"].rstrip("/") + path)
+        with urllib.request.urlopen(req, context=self.peer_ctx(), timeout=timeout) as r:
+            return json.load(r)
+
     def peer_ctx(self):
         p = self.cfg["peer"]
         ctx = ssl.create_default_context(cafile=p.get("ca"))
@@ -158,7 +164,8 @@ class Exchange:
                 self.state[c["name"]]["last_error"] = "%s: %s" % (type(e).__name__, e)
                 log.error("%s: rotation failed: %s", c["name"], e)
                 wait = c.get("retry", 30)
-            time.sleep(wait)
+            self.wake[c["name"]].wait(wait)       # "Rotate now" (console) sets the event to skip the wait
+            self.wake[c["name"]].clear()
 
     # slave side (called by the peer API)
     def on_stage(self, b):
@@ -178,7 +185,7 @@ class Exchange:
         log.info("%s: applied seq=%d key_id=%s", c["name"], b["seq"], key_id)
 
     def status(self):
-        return {"sae_id": self.cfg["sae_id"], "consumers": self.state}
+        return {"sae_id": self.cfg["sae_id"], "kme": self.cfg["kme"]["url"], "consumers": self.state}
 
 
 def serve_peer(ex):
@@ -215,6 +222,157 @@ def serve_peer(ex):
     srv.serve_forever()
 
 
+# ---------------------------------------------------------------- console (master only): status API + web page
+def read_state(path, max_age=40):
+    try:
+        if time.time() - os.path.getmtime(path) > max_age:
+            return None
+        return open(path).read()
+    except OSError:
+        return None
+
+
+def parse_ipsec(txt):
+    """swanctl --list-sas text (written by the strongswan container) -> {state, age_s, children}."""
+    if txt is None:
+        return {"state": "unknown"}
+    if "ESTABLISHED" not in txt:
+        return {"state": "down", "children": 0}
+    m = re.search(r"established (\d+)s ago", txt)
+    return {"state": "established", "age_s": int(m.group(1)) if m else None, "children": txt.count("INSTALLED")}
+
+
+def parse_macsec(txt):
+    if txt is None:
+        return {"state": "unknown"}
+    if not txt.strip():
+        return {"state": "idle"}
+    return {"state": "up" if " UP" in txt or "UP " in txt else "down"}
+
+
+def tcp_latency_ms(host, port, n=3):
+    """Median TCP connect time to the peer API: a latency figure that needs no ping binary or root."""
+    vals = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        try:
+            with socket.create_connection((host, port), timeout=2):
+                vals.append((time.perf_counter() - t0) * 1000)
+        except OSError:
+            pass
+    return round(sorted(vals)[len(vals) // 2], 1) if vals else None
+
+
+class Console:
+    def __init__(self, ex):
+        self.ex, self.cfg = ex, ex.cfg.get("console", {})
+        self.persist = self.cfg.get("persist", "/persist/console.json")
+        self.web = self.cfg.get("web", "/app/console")
+        self.state = {"linked": False, "fabric": ""}
+        try:
+            self.state.update(json.load(open(self.persist)))
+        except (OSError, ValueError):
+            pass
+        self._lat = (0, None)
+        u = urllib.parse.urlparse(ex.cfg["peer"]["url"])
+        self.peer_host, self.peer_port = u.hostname, u.port or 8444
+
+    def save(self):
+        atomic_write(self.persist, json.dumps(self.state), 0o600)
+
+    def latency(self):
+        if time.time() - self._lat[0] > 5:
+            self._lat = (time.time(), tcp_latency_ms(self.peer_host, self.peer_port))
+        return self._lat[1]
+
+    def status(self):
+        ex = self.ex
+        mine = [dict(name=n, type=c["type"], interval=c.get("interval", 3600), **ex.state[n]) for n, c in ex.cons.items()]
+        out = {"now": time.time(), "sae_id": ex.cfg["sae_id"], "kme": ex.cfg["kme"]["url"], "peer_addr": self.peer_host,
+               "peer_sae": next(iter(ex.cons.values()))["peer_sae"], "consumers": mine,
+               "ipsec": parse_ipsec(read_state(self.cfg.get("ipsec_file", "/state/ipsec.txt"))),
+               "macsec": parse_macsec(read_state(self.cfg.get("macsec_file", "/state/macsec.txt"))),
+               "latency_ms": self.latency(), "link": dict(self.state), "peer": None}
+        if self.state["linked"]:
+            try:
+                out["peer"] = ex.peer_get("/v1/status")
+            except Exception as e:  # noqa: BLE001
+                out["peer"] = {"error": "%s: %s" % (type(e).__name__, e)}
+        return out
+
+    def link(self, body):
+        """Link the slave: the peer must answer on its API. The Fabric connection is only a label (no Fabric credentials here)."""
+        fabric = str(body.get("fabric", ""))[:120]
+        try:
+            peer = self.ex.peer_get("/v1/status")
+        except Exception as e:  # noqa: BLE001
+            return 502, {"error": "peer %s:%s does not answer (%s)" % (self.peer_host, self.peer_port, e)}
+        self.state.update(linked=True, fabric=fabric); self.save()
+        return 200, {"ok": True, "peer": peer}
+
+    def unlink(self):
+        self.state.update(linked=False); self.save()
+        return 200, {"ok": True}
+
+    def rotate_now(self):
+        for n, c in self.ex.cons.items():
+            if c["role"] == "master":
+                self.ex.wake[n].set()
+        return 200, {"ok": True}
+
+
+def serve_console(con):
+    cfg = con.cfg
+    host_ok = {"localhost", "127.0.0.1", "::1"}
+
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _send(self, code, body, ctype="application/json"):
+            b = body if isinstance(body, bytes) else json.dumps(body).encode()
+            self.send_response(code); self.send_header("Content-Type", ctype); self.send_header("Content-Length", str(len(b)))
+            self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(b)
+
+        def _guard(self):                     # DNS-rebinding guard; state changes also need a header a foreign page cannot send
+            if urllib.parse.urlsplit("//" + self.headers.get("Host", "")).hostname not in host_ok:
+                self._send(403, {"error": "bad host"}); return False
+            return True
+
+        def do_GET(self):
+            if not self._guard():
+                return
+            if self.path == "/api/status":
+                return self._send(200, con.status())
+            files = {"/": ("index.html", "text/html"), "/index.html": ("index.html", "text/html"), "/equinix-logo.svg": ("equinix-logo.svg", "image/svg+xml")}
+            if self.path in files:
+                name, ctype = files[self.path]
+                try:
+                    return self._send(200, open(os.path.join(con.web, name), "rb").read(), ctype)
+                except OSError:
+                    pass
+            self._send(404, {"error": "not found"})
+
+        def do_POST(self):
+            if not self._guard():
+                return
+            if self.headers.get("X-Console") != "1":
+                return self._send(403, {"error": "missing X-Console header"})
+            try:
+                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+                fn = {"/api/link": lambda: con.link(body), "/api/unlink": con.unlink, "/api/rotate": con.rotate_now}.get(self.path)
+                if not fn:
+                    return self._send(404, {"error": "not found"})
+                code, out = fn()
+                self._send(code, out)
+            except Exception as e:  # noqa: BLE001
+                self._send(400, {"error": str(e)})
+
+    srv = ThreadingHTTPServer((cfg.get("bind", "127.0.0.1"), cfg.get("port", 8080)), H)
+    log.info("console on http://%s:%s (master only)", cfg.get("bind", "127.0.0.1"), cfg.get("port", 8080))
+    srv.serve_forever()
+
+
 def wait_for_files(cfg):
     """With https the KME/peer certificates are loaded after boot (Secret kme-tls): wait until they exist."""
     paths = [v for sec in ("kme", "peer") for k, v in cfg[sec].items() if k in ("ca", "cert", "key") and v]
@@ -232,6 +390,8 @@ def run(path):
     for c in cfg["consumers"]:
         if c["role"] == "master":
             threading.Thread(target=ex.master_loop, args=(c,), daemon=True).start()
+    if cfg.get("console") and any(c["role"] == "master" for c in cfg["consumers"]):
+        threading.Thread(target=serve_console, args=(Console(ex),), daemon=True).start()
     while True:
         time.sleep(3600)
 

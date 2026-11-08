@@ -5,7 +5,8 @@
 set -eu
 [ -r /etc/macsec/macsec.env ] && . /etc/macsec/macsec.env
 CONF=/macsec/macsec.conf
-[ -n "${MACSEC_IFACE:-}" ] || { echo "MACSEC_IFACE not set: idle"; exec sleep infinity; }
+publish() { if [ -d /state ]; then ip -br link show type macsec 2>/dev/null > /state/macsec.tmp && mv /state/macsec.tmp /state/macsec.txt; fi; return 0; }
+[ -n "${MACSEC_IFACE:-}" ] || { echo "MACSEC_IFACE not set: idle"; while true; do publish; sleep 10; done; }
 until [ -s "$CONF" ]; do echo "waiting for $CONF (first QKD key)"; sleep 3; done
 modprobe macsec 2>/dev/null || true
 wpa_supplicant -i "$MACSEC_IFACE" -D macsec_linux -c "$CONF" &
@@ -13,6 +14,7 @@ PID=$!
 last="$(md5sum < "$CONF")"
 while kill -0 "$PID" 2>/dev/null; do
   sleep 5
+  publish
   cur="$(md5sum < "$CONF")"
   if [ "$cur" != "$last" ]; then
     wpa_cli -p /run/wpa_supplicant -i "$MACSEC_IFACE" reconfigure >/dev/null && last="$cur" && echo "CAK changed, wpa_supplicant reconfigured"

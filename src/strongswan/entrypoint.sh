@@ -11,6 +11,7 @@ while kill -0 "$CH" 2>/dev/null; do
   if [ "$cur" != "$last" ]; then
     swanctl --load-all && last="$cur" || echo "swanctl --load-all failed, will retry"
   fi
+  if [ -d /state ]; then swanctl --list-sas > /state/ipsec.tmp 2>/dev/null && mv /state/ipsec.tmp /state/ipsec.txt || true; fi
   sleep 5
 done
 wait "$CH"

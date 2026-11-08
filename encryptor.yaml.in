@@ -29,6 +29,7 @@ spec:
           volumeMounts:
             - { name: swanctl-main, mountPath: /etc/swanctl/swanctl.conf, subPath: swanctl.conf, readOnly: true }
             - { name: swanctl-conf-d, mountPath: /etc/swanctl/conf.d }
+            - { name: runstate, mountPath: /state }
           resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 256Mi } }
         - name: macsec
           image: ghcr.io/equinix-svc/svc-helm-encryptor/macsec:0.1.0
@@ -36,6 +37,7 @@ spec:
           volumeMounts:
             - { name: site, mountPath: /etc/macsec/macsec.env, subPath: macsec.env, readOnly: true }
             - { name: macsec, mountPath: /macsec, readOnly: true }
+            - { name: runstate, mountPath: /state }
           resources: { requests: { cpu: 20m, memory: 32Mi }, limits: { memory: 128Mi } }
         - name: qkd-exchange
           image: ghcr.io/equinix-svc/svc-helm-encryptor/qkd-exchange:0.1.0
@@ -48,6 +50,8 @@ spec:
             - { name: swanctl-conf-d, mountPath: /swanctl/conf.d }
             - { name: macsec, mountPath: /macsec }
             - { name: ssh, mountPath: /ssh }
+            - { name: runstate, mountPath: /state, readOnly: true }
+            - { name: persist, mountPath: /persist }
           resources: { requests: { cpu: 20m, memory: 48Mi }, limits: { memory: 128Mi } }
       volumes:
         - { name: site, configMap: { name: site } }
@@ -57,3 +61,5 @@ spec:
         - { name: swanctl-conf-d, emptyDir: { medium: Memory } }     # QKD keys stay in RAM, never on disk
         - { name: macsec, emptyDir: { medium: Memory } }
         - { name: ssh, hostPath: { path: /var/lib/encryptor/ssh, type: DirectoryOrCreate } }
+        - { name: runstate, emptyDir: { medium: Memory } }     # tunnel and interface state published for the console
+        - { name: persist, hostPath: { path: /var/lib/encryptor/state, type: DirectoryOrCreate } }

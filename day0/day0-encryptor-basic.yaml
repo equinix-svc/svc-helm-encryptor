@@ -105,12 +105,16 @@ write_files:
       # BASIC uses the KME simulator over plain HTTP: no certificates
       SCHEME=http; TLSJ='"ca":null'
 
+      # console (page + status API) only on the master, on its own localhost: reach it with an SSH tunnel
+      CONSOLE=""; [ "$QKD_ROLE" = master ] && CONSOLE='"console":{"bind":"127.0.0.1","port":8080},'
+
       # --- exchange config: three consumers, same role on all of them
       INT=3600
       cat > "$W/config.json" <<EOF
       {"sae_id":"$SAE_ID",
        "kme":{"url":"$KME_URL",$TLSJ},
        "peer":{"url":"$SCHEME://$PEER_ADDR:8444","listen":8444$BIND,$TLSJ},
+       $CONSOLE
        "consumers":[
         {"name":"s2s","type":"ipsec","peer_sae":"$PEER_SAE_ID","role":"$QKD_ROLE","interval":$INT,"dir":"/swanctl/conf.d"},
         {"name":"macsec","type":"macsec","peer_sae":"$PEER_SAE_ID","role":"$QKD_ROLE","interval":86400,"dir":"/macsec"},

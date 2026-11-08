@@ -3,12 +3,17 @@
 # Environment: K (kubectl command), MAN (k3s manifests directory), NODE_IP (address the console listens on), FQDN,
 # ADMIN_EMAIL (login name and certificate contact), ADMIN_PASSWORD (generated when empty), CRED_DIR (default /etc/encryptor).
 # It creates Secret console-auth (the console's login, as a PBKDF2 hash), /etc/encryptor/credentials.env (root only) and
-# /etc/encryptor/fqdn, and writes traefik-config.yaml (Let's Encrypt resolver, persistent certificate store) and
-# console-ingress.yaml (Service and EndpointSlice pointing at the node address, plus the Ingress) into MAN.
+# /etc/encryptor/fqdn. The node's public IP is only known after creation, so the DNS record comes later: traefik-config.yaml
+# (Let's Encrypt resolver, persistent certificate store) and console-ingress.yaml (Service and EndpointSlice pointing at the
+# node address, plus the Ingress) are written into a PENDING directory, and a systemd service moves them into MAN as soon as
+# FQDN resolves to this node: the first Let's Encrypt attempt then succeeds. The service state is read by the login banner.
 set -euo pipefail
 K="${K:-k3s kubectl}"
 MAN="${MAN:-/var/lib/rancher/k3s/server/manifests}"
 CRED_DIR="${CRED_DIR:-/etc/encryptor}"
+PENDING="${PENDING:-/var/lib/encryptor/pending}"
+BIN="${BIN:-/usr/local/bin/enc-dns-wait.sh}"
+UNIT_DIR="${UNIT_DIR:-/etc/systemd/system}"
 : "${NODE_IP:?NODE_IP is required}"
 
 FQDN="$(printf '%s' "${FQDN:-}" | tr 'A-Z' 'a-z')"
@@ -31,7 +36,9 @@ install -d -m 0755 "$CRED_DIR"
 ( umask 077; printf 'ADMIN_EMAIL=%s\nADMIN_PASSWORD=%s\n' "$ADMIN_EMAIL" "$ADMIN_PASSWORD" > "$CRED_DIR/credentials.env" )
 printf '%s\n' "$FQDN" > "$CRED_DIR/fqdn"
 
-cat > "$MAN/traefik-config.yaml" <<EOF
+mkdir -p "$PENDING"
+rm -f "$MAN/traefik-config.yaml" "$MAN/console-ingress.yaml"
+cat > "$PENDING/traefik-config.yaml" <<EOF
 apiVersion: helm.cattle.io/v1
 kind: HelmChartConfig
 metadata: { name: traefik, namespace: kube-system }
@@ -54,7 +61,7 @@ spec:
     podSecurityContext: { fsGroup: 65532, fsGroupChangePolicy: OnRootMismatch }
 EOF
 
-cat > "$MAN/console-ingress.yaml" <<EOF
+cat > "$PENDING/console-ingress.yaml" <<EOF
 # https://$FQDN/ -> the master console, which listens on the node address $NODE_IP:8080 (the Pod uses the host network)
 apiVersion: v1
 kind: Service
@@ -86,4 +93,52 @@ spec:
     - host: "$FQDN"
       http: { paths: [{ path: /, pathType: Prefix, backend: { service: { name: console, port: { number: 8080 } } } }] }
 EOF
-echo "console published at https://$FQDN (login: $ADMIN_EMAIL, password in $CRED_DIR/credentials.env)"
+
+# --- wait for DNS, then enable the certificates
+cat > "$CRED_DIR/dns-wait.conf" <<DNSEOF
+NAMES="$FQDN"
+PENDING="$PENDING"
+MAN="$MAN"
+STATE="$CRED_DIR/dns-wait.state"
+DNSEOF
+cat > "$BIN" <<'WAITEOF'
+#!/usr/bin/env bash
+# enc-dns-wait.sh <conf> - wait until every name in NAMES resolves to this node (a local address or the address the internet
+# sees), then move the pending manifests into the k3s manifests directory: Traefik then asks Let's Encrypt for the certificate.
+# State (one line) goes to $STATE: "waiting ip=<address to use> names=<a,b>" or "ready <date>".
+set -u
+. "$1"
+if grep -q '^ready' "$STATE" 2>/dev/null; then exit 0; fi          # done before (reboot): the manifests are already in place
+while true; do
+  ext=$(curl -fsS -m 5 https://api.ipify.org 2>/dev/null | grep -E '^[0-9.]+$' || true)
+  mine=$( { ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1; [ -n "$ext" ] && echo "$ext"; } | sort -u )
+  use=${ext:-$(echo "$mine" | head -1)}
+  ok=1
+  for n in $NAMES; do
+    got=$(getent ahostsv4 "$n" 2>/dev/null | awk '{print $1}' | sort -u)
+    if [ -z "$got" ] || ! comm -12 <(echo "$got") <(echo "$mine") | grep -q .; then ok=0; fi
+  done
+  if [ "$ok" = 1 ]; then
+    cp "$PENDING"/*.yaml "$MAN"/ && echo "ready $(date -Is)" > "$STATE"
+    exit 0
+  fi
+  echo "waiting ip=$use names=$(echo $NAMES | tr ' ' ',')" > "$STATE"
+  sleep "${DNS_WAIT_INTERVAL:-30}"
+done
+WAITEOF
+chmod 0755 "$BIN"
+echo "waiting ip=pending names=$FQDN" > "$CRED_DIR/dns-wait.state"
+cat > "$UNIT_DIR/enc-dns-wait.service" <<UNITEOF
+[Unit]
+Description=Wait for the DNS record of the console name, then enable the certificate
+After=network-online.target
+Wants=network-online.target
+[Service]
+ExecStart=$BIN $CRED_DIR/dns-wait.conf
+Restart=on-failure
+RestartSec=30
+[Install]
+WantedBy=multi-user.target
+UNITEOF
+if [ -d /run/systemd/system ] && [ -z "${NO_SYSTEMD:-}" ]; then systemctl daemon-reload; systemctl enable --now enc-dns-wait.service; fi
+echo "console: https://$FQDN will answer as soon as the DNS record of $FQDN points to this node (login: $ADMIN_EMAIL, password in $CRED_DIR/credentials.env)"

@@ -60,7 +60,7 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 | `IKE_PSK` | yes | yes | - | `4f9c2a7e1b8d3c6a5e0f9b2d7c4a1e83` | IKEv2 secret, identical on both ends, never stored in the repo. The IPsec tunnel is always configured, so both templates refuse to start without it. Generate with `openssl rand -hex 16`. |
 | `REGISTRY_USER` | yes | yes | - | `my-github-user` | GitHub login used to pull the private images from ghcr.io. Day 0 stops the encryptor install without it. |
 | `REGISTRY_TOKEN` | yes | yes | - | `ghp_AbCdEf1234567890AbCdEf1234567890AbCd` | Classic personal access token with only `read:packages`. Written to `/etc/rancher/k3s/registries.yaml` (root only) before k3s starts. Expires: set a reminder to rotate it. |
-| `FQDN` | yes | yes | - | `console1.example.net` | Master only (ignored on a slave). Public name of the console, served at `https://<FQDN>` with a Let's Encrypt certificate. Create the DNS record pointing to the master before booting, and keep port 80 reachable from the internet. |
+| `FQDN` | yes | yes | - | `fred-enc-par01.example.net` | Master only (ignored on a slave). Public name of the console, served at `https://<FQDN>` with a Let's Encrypt certificate. The master's public IP is only known after creation, so create the DNS record afterwards: the node waits (checks every 30 seconds) until `<FQDN>` resolves to it, then enables the certificate, so the first Let's Encrypt attempt succeeds. The login banner shows the record to create. Keep port 80 reachable from the internet. |
 | `ADMIN_EMAIL` | yes | yes | - | `xxxx@eu.equinix.com` | Master only. Login name of the console, and contact address for the Let's Encrypt certificate: it must be a real address. |
 | `LOCAL_ADDR` | no | no | address of the default route | `172.16.0.11` | This appliance's own IP towards the peer. It is the IKE source address and the only address the peer API listens on. Set it when the peer is reached over a second interface or subnet. |
 | `LOCAL_TS` | no | no | `0.0.0.0/0` | `10.1.0.0/24` | Local protected subnet. |
@@ -108,7 +108,7 @@ The master serves a small web console: the appliance pair as two nodes joined by
 | Item | Detail |
 |---|---|
 | Open | `https://<FQDN>`, login `ADMIN_EMAIL` and the password in `/etc/encryptor/credentials.env` on the master (generated when `ADMIN_PASSWORD` is empty) |
-| Setup | Day 0 runs `scripts/console-setup.sh` on the master: the login (a PBKDF2 hash in Secret `console-auth`), Traefik's Let's Encrypt resolver with a persistent certificate store, and a Service, EndpointSlice and Ingress that point Traefik at the console on the node address (the Pod uses the host network) |
+| Setup | Day 0 runs `scripts/console-setup.sh` on the master: the login (a PBKDF2 hash in Secret `console-auth`), Traefik's Let's Encrypt resolver with a persistent certificate store, and a Service, EndpointSlice and Ingress that point Traefik at the console on the node address (the Pod uses the host network). The last two are staged and enabled by the `enc-dns-wait` service once `FQDN` resolves to the master, so until you create the DNS record the console is not routed |
 | Master side | SAE, KME, peer SAE; consumers IPsec, MACsec, SSH with interval, sequence, last key age and state |
 | Slave side | greyed until you click "Link slave". The peer address is read-only, taken from the portal parameter `PEER_ADDR`. Linking checks that the peer answers on its API, then shows the slave's SAE and KME |
 | Fabric connection | a text label stored on the node (`/var/lib/encryptor/state/console.json`) and shown on the slave card. The service token and the virtual connection itself are created outside the node: it has no Fabric credentials and never reads the connection's real state |
@@ -138,6 +138,7 @@ The master serves a small web console: the appliance pair as two nodes joined by
 - **PPK timing:** a new PPK only takes effect at the next IKE reauthentication, not on child-SA rekeys.
 - **PPK ID:** it is fixed, so a brief key-switch window can fail an authentication. That is retried.
 - **SSH:** QKD can't plug into the SSH transport itself. qkd-exchange only rotates key pairs, and you still need to wire them into `sshd` or a CA.
+- **Public name:** the DNS wait was tested with stand-ins for DNS and the node's addresses; the certificate issuance itself has not been tested. `sudo cat /etc/encryptor/dns-wait.state` shows the state, and `check-install.sh` shows the certificate issuer.
 - **Untested:** a real KME (certificate and SAE ID mapping vary by vendor), the images pulled from ghcr.io on a real node, Equinix Network Edge devices, and the Fabric link between them (including whether the virtual switch passes MACsec frames).
 - **IKE authentication:** it uses a shared secret (`IKE_PSK`) for now. Certificates would be better for production.
 - **Day 0 size:** the templates are about 14 KB, under the portal limit of 20,000 characters. No certificate goes through Day 0.

@@ -60,3 +60,14 @@ else
   fail "neither namespace encryptor nor ai-gateway exists: the manifest was not applied (see Day 0 above)"
 fi
 echo
+
+if [ -r /etc/encryptor/fqdn ]; then
+  hdr "Public name"
+  n=$(cat /etc/encryptor/fqdn); st=$(cat /etc/encryptor/dns-wait.state 2>/dev/null)
+  info "name: $n   dns-wait: ${st:-unknown}"
+  case "$st" in ready*) pass "DNS resolved to this node, certificate settings enabled" ;; *) fail "DNS not ready: create an A record for $n pointing to this node" ;; esac
+  for h in "$n"; do
+    iss=$(echo | timeout 10 openssl s_client -connect "$h:443" -servername "$h" 2>/dev/null | openssl x509 -noout -issuer 2>/dev/null)
+    case "$iss" in *"Let's Encrypt"*) pass "$h: certificate from Let's Encrypt" ;; "") fail "$h: no TLS answer yet" ;; *) fail "$h: not a Let's Encrypt certificate yet ($iss)" ;; esac
+  done
+fi

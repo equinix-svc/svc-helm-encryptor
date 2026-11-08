@@ -23,7 +23,7 @@ ls /var/lib/rancher/k3s/server/manifests 2>/dev/null | grep -E "encryptor|ai-gat
 if $K get ns $NS >/dev/null 2>&1; then
   hdr "encryptor pods"
   $K -n $NS get pods -o wide 2>&1 | sed 's/^/      /'
-  bad=$($K -n $NS get pods --no-headers 2>/dev/null | awk '$3!="Terminating"{split($2,a,"/"); if ($3!~/Running|Completed/ || a[1]!=a[2]) n++} END{print n+0}')
+  bad=$($K -n $NS get pods --no-headers 2>/dev/null | awk '$3!="Terminating" && $3!="Completed"{split($2,a,"/"); if ($3!="Running" || a[1]!=a[2]) n++} END{print n+0}')
   [ "$bad" -eq 0 ] && pass "all pods Running and ready" || { fail "$bad pod(s) not Running"; $K -n $NS get events --sort-by=.lastTimestamp 2>/dev/null | grep -iE "fail|error|pull|back-off" | tail -6 | sed 's/^/      /'; }
   ready=$($K -n $NS get deploy encryptor -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
   [ "${ready:-0}" -ge 1 ] && pass "deployment encryptor ready" || fail "deployment encryptor not ready"
@@ -53,7 +53,7 @@ if $K get ns $NS >/dev/null 2>&1; then
 elif $K get ns ai-gateway >/dev/null 2>&1; then
   hdr "ai-gateway pods"
   $K -n ai-gateway get pods 2>&1 | sed 's/^/      /'
-  bad=$($K -n ai-gateway get pods --no-headers 2>/dev/null | awk '$3!="Terminating"{split($2,a,"/"); if ($3!~/Running|Completed/ || a[1]!=a[2]) n++} END{print n+0}')
+  bad=$($K -n ai-gateway get pods --no-headers 2>/dev/null | awk '$3!="Terminating" && $3!="Completed"{split($2,a,"/"); if ($3!="Running" || a[1]!=a[2]) n++} END{print n+0}')
   [ "$bad" -eq 0 ] && pass "all pods Running and ready" || fail "$bad pod(s) not ready yet (LLM Guard needs ~10 min on first start; a rollout in progress is normal)"
   curl -ks -o /dev/null -w "      LiteLLM /health/liveliness -> %{http_code}\n" https://localhost/health/liveliness
 else

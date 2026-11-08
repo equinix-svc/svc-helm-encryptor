@@ -19,7 +19,6 @@
 #     FQDN ADMIN_EMAIL ADMIN_PASSWORD  master only (ignored on a slave): public name of the console, served at https://FQDN with a
 #                   Let's Encrypt certificate (create the DNS record first); ADMIN_EMAIL = login name and certificate contact
 #                   (a real address); ADMIN_PASSWORD generated when empty. FQDN and ADMIN_EMAIL are required on the master.
-#     STACK_REF STACK_TOKEN   branch/tag of this repo to fetch (default main); token only for a private fork
 # On a single node or the first server, once k3s is Ready, it creates Secret site-secrets and ConfigMap site in
 # namespace encryptor and downloads encryptor.yaml into the k3s manifests directory.
 # Equinix injects a STATIC address (no DHCP), so this file configures the network itself.
@@ -81,8 +80,6 @@ write_files:
       MACSEC_IFACE='[(${MACSEC_IFACE})]'
       MACSEC_ADDR='[(${MACSEC_ADDR})]'
       LOCAL_ADDR='[(${LOCAL_ADDR})]'
-      STACK_REF='[(${STACK_REF})]'
-      STACK_TOKEN='[(${STACK_TOKEN})]'
       REGISTRY_USER='[(${REGISTRY_USER})]'
       REGISTRY_TOKEN='[(${REGISTRY_TOKEN})]'
       FQDN='[(${FQDN})]'
@@ -98,7 +95,6 @@ write_files:
       set -euo pipefail
       K="/usr/local/bin/k3s kubectl"
       MAN=/var/lib/rancher/k3s/server/manifests
-      REF="${STACK_REF:-main}"
       NS=encryptor
       for v in SAE_ID PEER_SAE_ID QKD_ROLE KME_URL PEER_ADDR IKE_PSK REGISTRY_USER REGISTRY_TOKEN; do
         [ -n "${!v:-}" ] || { echo "missing required parameter $v"; exit 1; }
@@ -187,27 +183,25 @@ write_files:
         --dry-run=client -o yaml | $K apply -f -
       $K -n $NS create secret generic site-secrets --from-file=swanctl.conf="$W/swanctl.conf" --dry-run=client -o yaml | $K apply -f -
 
-      AUTH=()
-      [ -n "${STACK_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer $STACK_TOKEN")
       fetch() {   # fetch <file in repo>
         for i in 1 2 3 4 5 6; do
-          curl -fsSL --retry 3 "${AUTH[@]}" -H "Accept: application/vnd.github.raw" \
-            "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/$1?ref=$REF" -o "$MAN/$1" && break
+          curl -fsSL --retry 3 -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/$1" -o "$MAN/$1" && break
           echo "download of $1 failed (try $i), retrying"; sleep 20
         done
         [ -s "$MAN/$1" ] || { echo "could not download $1"; exit 1; }
-        echo "$1 installed in $MAN (ref $REF)"
+        echo "$1 installed in $MAN"
       }
       EXTRA=""; [ "${INSTALL_KME_SIM:-}" = yes ] && EXTRA=dev-kme-sim.yaml
       for f in encryptor.yaml $EXTRA; do fetch "$f"; done
       # Login banner (best effort: never stops the install)
-      curl -fsSL --retry 3 "${AUTH[@]}" -H "Accept: application/vnd.github.raw" \
-        "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/scripts/motd.sh?ref=$REF" -o /etc/profile.d/qkd-encryptor-motd.sh \
+      curl -fsSL --retry 3 -H "Accept: application/vnd.github.raw" \
+        "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/scripts/motd.sh" -o /etc/profile.d/qkd-encryptor-motd.sh \
         && chmod 0644 /etc/profile.d/qkd-encryptor-motd.sh && echo "login banner installed" || echo "login banner not installed (non-fatal)"
       # Master console at https://FQDN (login and Let's Encrypt certificate)
       if [ "$QKD_ROLE" = master ]; then
-        curl -fsSL --retry 3 "${AUTH[@]}" -H "Accept: application/vnd.github.raw" \
-          "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/scripts/console-setup.sh?ref=$REF" -o /usr/local/bin/day0-console.sh \
+        curl -fsSL --retry 3 -H "Accept: application/vnd.github.raw" \
+          "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/scripts/console-setup.sh" -o /usr/local/bin/day0-console.sh \
           && K="$K" MAN="$MAN" NODE_IP="$NODE_IP" FQDN="$FQDN" ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="${ADMIN_PASSWORD:-}" bash /usr/local/bin/day0-console.sh \
           || { echo "console setup failed (see above)"; exit 1; }
       fi
@@ -345,7 +339,7 @@ write_files:
         IKE_PSK="$IKE_PSK" LOCAL_ADDR="$LOCAL_ADDR" REGISTRY_USER="$REGISTRY_USER" REGISTRY_TOKEN="$REGISTRY_TOKEN" \
         FQDN="$FQDN" ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" \
         LOCAL_TS="$LOCAL_TS" REMOTE_TS="$REMOTE_TS" MACSEC_IFACE="$MACSEC_IFACE" MACSEC_ADDR="$MACSEC_ADDR" \
-        STACK_REF="$STACK_REF" STACK_TOKEN="$STACK_TOKEN" /usr/local/bin/day0-encryptor.sh \
+        /usr/local/bin/day0-encryptor.sh \
           || echo "encryptor install failed: see this log"
       fi
 

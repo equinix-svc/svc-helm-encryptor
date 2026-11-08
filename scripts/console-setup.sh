@@ -105,7 +105,7 @@ cat > "$BIN" <<'WAITEOF'
 #!/usr/bin/env bash
 # enc-dns-wait.sh <conf> - wait until every name in NAMES resolves to this node (a local address or the address the internet
 # sees), then move the pending manifests into the k3s manifests directory: Traefik then asks Let's Encrypt for the certificate.
-# State (one line) goes to $STATE: "waiting ip=<address to use> names=<a,b>" or "ready <date>".
+# State (one line) goes to $STATE: "waiting ip=<address to use> names=<a,b> cur=<name=ips/ok|wrong|none|...>" or "ready <date>".
 set -u
 . "$1"
 if grep -q '^ready' "$STATE" 2>/dev/null; then exit 0; fi          # done before (reboot): the manifests are already in place
@@ -113,16 +113,19 @@ while true; do
   ext=$(curl -fsS -m 5 https://api.ipify.org 2>/dev/null | grep -E '^[0-9.]+$' || true)
   mine=$( { ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1; [ -n "$ext" ] && echo "$ext"; } | sort -u )
   use=${ext:-$(echo "$mine" | head -1)}
-  ok=1
+  ok=1; cur=""
   for n in $NAMES; do
     got=$(getent ahostsv4 "$n" 2>/dev/null | awk '{print $1}' | sort -u)
-    if [ -z "$got" ] || ! comm -12 <(echo "$got") <(echo "$mine") | grep -q .; then ok=0; fi
+    if [ -z "$got" ]; then st=none; ips=-; ok=0
+    elif comm -12 <(echo "$got") <(echo "$mine") | grep -q .; then st=ok; ips=$(echo $got | tr ' ' '+')
+    else st=wrong; ips=$(echo $got | tr ' ' '+'); ok=0; fi
+    cur="${cur:+$cur|}$n=$ips/$st"
   done
   if [ "$ok" = 1 ]; then
     cp "$PENDING"/*.yaml "$MAN"/ && echo "ready $(date -Is)" > "$STATE"
     exit 0
   fi
-  echo "waiting ip=$use names=$(echo $NAMES | tr ' ' ',')" > "$STATE"
+  echo "waiting ip=$use names=$(echo $NAMES | tr ' ' ',') cur=$cur" > "$STATE"
   sleep "${DNS_WAIT_INTERVAL:-30}"
 done
 WAITEOF

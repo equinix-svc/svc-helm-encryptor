@@ -57,9 +57,17 @@ except Exception:
   dns=$(cat /etc/encryptor/dns-wait.state 2>/dev/null)
   case "$dns" in
     waiting*)
-      dip=${dns#*ip=}; dip=${dip% *}; [ "$dip" = pending ] && dip="this node's public IP (see the portal)"
-      printf '  %s! DNS not ready%s: create A record(s) pointing to %s%s%s\n' "$Y" "$N" "$B" "$dip" "$N"
-      for n in $(printf '%s' "${dns#*names=}" | tr ',' ' '); do printf '      %s\n' "$n"; done
+      dip=${dns#*ip=}; dip=${dip%% *}; [ "$dip" = pending ] && dip="this node's public IP (see the portal)"
+      printf '  %s! DNS not ready%s: set the A record(s) to %s%s%s\n' "$Y" "$N" "$B" "$dip" "$N"
+      if [ "${dns#*cur=}" != "$dns" ]; then
+        for it in $(printf '%s' "${dns#*cur=}" | tr '|' ' '); do
+          nm=${it%%=*}; rest=${it#*=}; ips=${rest%/*}; st=${rest##*/}
+          case "$st" in ok) tag="ok" ;; none) tag="not found" ;; *) tag="WRONG: this node is $dip" ;; esac
+          printf '      %-42s now %-16s (%s)\n' "$nm" "${ips/#-/none}" "$tag"
+        done
+      else
+        for n in $(printf '%s' "${dns#*names=}" | tr ',' ' '); do printf '      %s\n' "$n"; done
+      fi
       printf '    The certificates are requested automatically within a minute of the records resolving.\n\n' ;;
   esac
   [ -n "$scheme" ] && printf '  %sWEB INTERFACES%s\n' "$B" "$N"

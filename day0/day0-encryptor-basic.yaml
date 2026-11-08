@@ -138,8 +138,14 @@ write_files:
           keyingtries = 0
           ppk_id = qkd-s2s
           ppk_required = yes
-          local { auth = psk; id = $SAE_ID }
-          remote { auth = psk; id = $PEER_SAE_ID }
+          local {
+            auth = psk
+            id = $SAE_ID
+          }
+          remote {
+            auth = psk
+            id = $PEER_SAE_ID
+          }
           children {
             s2s {
               local_ts = ${LOCAL_TS:-0.0.0.0/0}

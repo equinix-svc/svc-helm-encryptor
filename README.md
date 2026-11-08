@@ -33,6 +33,7 @@ One master/slave pair rotates keys. The master requests keys from its KME, sends
 | 3. Day 0 file | [`day0/day0-encryptor-basic.yaml`](day0/day0-encryptor-basic.yaml) for a first test, [`day0/day0-encryptor-advanced.yaml`](day0/day0-encryptor-advanced.yaml) for a real KME. |
 | 4. Parameters | Five required for BASIC, see below. Full list: [Day 0 templates](#3-day-0-templates). Certificates for a real KME are loaded after boot: [section 4](#4-load-kme-certificates-after-boot). |
 | 5. Check | On the node: `curl -fsSL https://raw.githubusercontent.com/equinix-svc/svc-helm-encryptor/main/scripts/check-install.sh \| sudo bash`. It is read-only, prints PASS/FAIL and never prints secrets. |
+| Login banner | Shown on each interactive SSH login: role, peer, KME, live status (pods, IPsec SA, last key), the JSON status endpoints (peer API, KME simulator on the BASIC master) and tips. Installed by Day 0 from `scripts/motd.sh` into `/etc/profile.d/`; never shows a secret. On an existing node: `sudo curl -fsSL https://raw.githubusercontent.com/equinix-svc/svc-helm-encryptor/main/scripts/motd.sh -o /etc/profile.d/qkd-encryptor-motd.sh` |
 
 BASIC, one appliance of each role (the master also runs the KME simulator):
 

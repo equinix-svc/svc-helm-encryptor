@@ -178,6 +178,10 @@ write_files:
       }
       EXTRA=""; [ "${INSTALL_KME_SIM:-}" = yes ] && EXTRA=dev-kme-sim.yaml
       for f in encryptor.yaml $EXTRA; do fetch "$f"; done
+      # Login banner (best effort: never stops the install)
+      curl -fsSL --retry 3 "${AUTH[@]}" -H "Accept: application/vnd.github.raw" \
+        "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/scripts/motd.sh?ref=$REF" -o /etc/profile.d/qkd-encryptor-motd.sh \
+        && chmod 0644 /etc/profile.d/qkd-encryptor-motd.sh && echo "login banner installed" || echo "login banner not installed (non-fatal)"
 
   - path: /usr/local/bin/day0-bootstrap.sh
     owner: root:root

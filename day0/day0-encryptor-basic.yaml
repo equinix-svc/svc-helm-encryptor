@@ -15,6 +15,9 @@
 #     MACSEC_ADDR   CIDR on the macsec interface, e.g. 10.99.0.1/24      (optional)
 #     LOCAL_TS REMOTE_TS  protected subnets (default 0.0.0.0/0)          (optional)
 #     REGISTRY_USER REGISTRY_TOKEN  GitHub login and read:packages token to pull the private images from ghcr.io  (required)
+#     FQDN ADMIN_EMAIL ADMIN_PASSWORD  master only (ignored on a slave): public name of the console, served at https://FQDN with a
+#                   Let's Encrypt certificate (create the DNS record first); ADMIN_EMAIL = login name and certificate contact
+#                   (a real address); ADMIN_PASSWORD generated when empty. FQDN and ADMIN_EMAIL are required on the master.
 #     STACK_REF STACK_TOKEN  repo branch/tag (default main), token only for a private fork (optional)
 # Equinix injects a STATIC address (no DHCP), so this file configures the network itself.
 # Roles (K3S_ROLE): single | server | agent  (the encryptor is only installed on single / first server)
@@ -76,6 +79,9 @@ write_files:
       STACK_TOKEN='[(${STACK_TOKEN})]'
       REGISTRY_USER='[(${REGISTRY_USER})]'
       REGISTRY_TOKEN='[(${REGISTRY_TOKEN})]'
+      FQDN='[(${FQDN})]'
+      ADMIN_EMAIL='[(${ADMIN_EMAIL})]'
+      ADMIN_PASSWORD='[(${ADMIN_PASSWORD})]'
 
   - path: /usr/local/bin/day0-encryptor.sh
     owner: root:root
@@ -91,6 +97,12 @@ write_files:
       for v in QKD_ROLE PEER_ADDR IKE_PSK REGISTRY_USER REGISTRY_TOKEN; do
         [ -n "${!v:-}" ] || { echo "missing required parameter $v"; exit 1; }
       done
+      if [ "$QKD_ROLE" = master ]; then
+        for v in FQDN ADMIN_EMAIL; do
+          [ -n "${!v:-}" ] || { echo "missing required parameter $v (the master console is served at https://FQDN)"; exit 1; }
+        done
+        FQDN="$(printf '%s' "$FQDN" | tr 'A-Z' 'a-z')"
+      fi
       # BASIC defaults: fixed SAE IDs, KME simulator on the master
       INSTALL_KME_SIM=no
       case "$QKD_ROLE" in
@@ -105,8 +117,8 @@ write_files:
       # BASIC uses the KME simulator over plain HTTP: no certificates
       SCHEME=http; TLSJ='"ca":null'
 
-      # console (page + status API) only on the master, on its own localhost: reach it with an SSH tunnel
-      CONSOLE=""; [ "$QKD_ROLE" = master ] && CONSOLE='"console":{"bind":"127.0.0.1","port":8080},'
+      # console (page + status API) only on the master: listens on the node address, behind Traefik (https://FQDN) and its own login
+      CONSOLE=""; [ "$QKD_ROLE" = master ] && CONSOLE='"console":{"bind":"'"$NODE_IP"'","port":8080,"hosts":["'"$FQDN"'"],"auth_file":"/etc/qkd/auth/auth"},'
 
       # --- exchange config: three consumers, same role on all of them
       INT=3600
@@ -188,6 +200,13 @@ write_files:
       curl -fsSL --retry 3 "${AUTH[@]}" -H "Accept: application/vnd.github.raw" \
         "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/scripts/motd.sh?ref=$REF" -o /etc/profile.d/qkd-encryptor-motd.sh \
         && chmod 0644 /etc/profile.d/qkd-encryptor-motd.sh && echo "login banner installed" || echo "login banner not installed (non-fatal)"
+      # Master console at https://FQDN (login and Let's Encrypt certificate)
+      if [ "$QKD_ROLE" = master ]; then
+        curl -fsSL --retry 3 "${AUTH[@]}" -H "Accept: application/vnd.github.raw" \
+          "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/scripts/console-setup.sh?ref=$REF" -o /usr/local/bin/day0-console.sh \
+          && K="$K" MAN="$MAN" NODE_IP="$NODE_IP" FQDN="$FQDN" ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="${ADMIN_PASSWORD:-}" bash /usr/local/bin/day0-console.sh \
+          || { echo "console setup failed (see above)"; exit 1; }
+      fi
 
   - path: /usr/local/bin/day0-bootstrap.sh
     owner: root:root
@@ -319,6 +338,7 @@ write_files:
       if [ "$UNIT" = k3s ] && [ -z "$K3S_SERVER_URL" ]; then
         echo "installing the encryptor stack"
         QKD_ROLE="$QKD_ROLE" PEER_ADDR="$PEER_ADDR" IKE_PSK="$IKE_PSK" LOCAL_ADDR="$LOCAL_ADDR" REGISTRY_USER="$REGISTRY_USER" REGISTRY_TOKEN="$REGISTRY_TOKEN" \
+        FQDN="$FQDN" ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" \
         LOCAL_TS="$LOCAL_TS" REMOTE_TS="$REMOTE_TS" MACSEC_IFACE="$MACSEC_IFACE" MACSEC_ADDR="$MACSEC_ADDR" \
         STACK_REF="$STACK_REF" STACK_TOKEN="$STACK_TOKEN" /usr/local/bin/day0-encryptor.sh \
           || echo "encryptor install failed: see this log"

@@ -9,13 +9,14 @@ fi
 export QKDENC_MOTD_SHOWN=1
 
 _qkdenc_motd() {
-  local B="" D="" G="" Y="" N="" bindaddr ip host cfg role sae peer kme sim pods_r pods_t pstat sas klog last age scheme
+  local B="" D="" G="" Y="" N="" fqdn bindaddr ip host cfg role sae peer kme sim pods_r pods_t pstat sas klog last age scheme
   if [ -z "${NO_COLOR:-}" ]; then B=$'\e[1m'; D=$'\e[2m'; G=$'\e[32m'; Y=$'\e[33m'; N=$'\e[0m'; fi
   _k() {   # kubectl as the login user (kubeconfig copied by Day 0), else sudo; never blocks the login for long
     if [ -r "$HOME/.kube/config" ]; then KUBECONFIG="$HOME/.kube/config" timeout 3 k3s kubectl "$@" 2>/dev/null
     else timeout 3 sudo -n k3s kubectl "$@" 2>/dev/null; fi
   }
   host=$(hostname)
+  fqdn=$(cat /etc/encryptor/fqdn 2>/dev/null)
   ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}'); ip=${ip:-<node-ip>}
 
   cfg=$(_k -n encryptor get cm site -o jsonpath='{.data.config\.json}')
@@ -55,7 +56,7 @@ except Exception:
   printf '  Status      %s\n\n' "$pstat"
   [ -n "$scheme" ] && printf '  %sWEB INTERFACES%s\n' "$B" "$N"
   [ "$role" = slave ] && printf '  %-15s %-38s %s\n' "Console" "none on a slave" "open the console on the master (${peeraddr})"
-  [ "$role" = master ] && printf '  %-15s %-38s %s\n' "Console" "http://localhost:8080" "SSH tunnel: ssh -L 8080:localhost:8080 ${USER:-<user>}@$ip"
+  [ "$role" = master ] && printf '  %-15s %-38s %s\n' "Console" "https://${fqdn:-<FQDN>}" "login: ADMIN_EMAIL, password in /etc/encryptor/credentials.env"
   [ -n "$scheme" ] && printf '  %-15s %-38s %s\n' "Peer API"   "$scheme://$ip:8444/v1/status" "JSON, key rotation state (mTLS in ADVANCED)"
   [ -n "$sim" ] && [ -n "$peer" ] && printf '  %-15s %-38s %s\n' "KME simulator" "http://$ip:8443/api/v1/keys/$peer/status" "JSON, ETSI 014 status (lab, BASIC master)"
   printf '\n  %sTIPS%s\n' "$B" "$N"

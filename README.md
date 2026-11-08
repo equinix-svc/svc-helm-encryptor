@@ -31,7 +31,7 @@ One master/slave pair rotates keys. The master requests keys from its KME, sends
 | 1. VM image | Plain `k3s-node` image (`k3s-node.qcow2`) from [svc-ne-byoi-builder](https://github.com/equinix-svc/svc-ne-byoi-builder). Portal settings: `docs/portal-values.md` in that repo. |
 | 2. Container images | `ghcr.io/equinix-svc/svc-helm-encryptor/{qkd-exchange,strongswan,macsec}:0.1.0`, built by the `images` GitHub Actions workflow on every change under `src/` (or by hand with `scripts/push-images.sh`). The packages are private: the node pulls them with `REGISTRY_USER` and `REGISTRY_TOKEN` (required). The images must exist before the first boot. |
 | 3. Day 0 file | [`day0/day0-encryptor-basic.yaml`](day0/day0-encryptor-basic.yaml) for a first test, [`day0/day0-encryptor-advanced.yaml`](day0/day0-encryptor-advanced.yaml) for a real KME. |
-| 4. Parameters | Five required for BASIC, see below. Full list: [Day 0 templates](#3-day-0-templates). Certificates for a real KME are loaded after boot: [section 4](#4-load-kme-certificates-after-boot). |
+| 4. Parameters | Five required for BASIC, plus `FQDN` and `ADMIN_EMAIL` on the master, see below. Full list: [Day 0 templates](#3-day-0-templates). Certificates for a real KME are loaded after boot: [section 4](#4-load-kme-certificates-after-boot). |
 | 5. Check | On the node: `curl -fsSL https://raw.githubusercontent.com/equinix-svc/svc-helm-encryptor/main/scripts/check-install.sh \| sudo bash`. It is read-only, prints PASS/FAIL and never prints secrets. |
 | Login banner | Shown on each interactive SSH login: role, peer, KME, live status (pods, IPsec SA, last key), the JSON status endpoints (peer API, KME simulator on the BASIC master) and tips. Installed by Day 0 from `scripts/motd.sh` into `/etc/profile.d/`; never shows a secret. On an existing node: `sudo curl -fsSL https://raw.githubusercontent.com/equinix-svc/svc-helm-encryptor/main/scripts/motd.sh -o /etc/profile.d/qkd-encryptor-motd.sh` |
 
@@ -44,8 +44,10 @@ BASIC, one appliance of each role (the master also runs the KME simulator):
 | `IKE_PSK` | the same secret, e.g. `openssl rand -hex 16` | the same secret |
 | `REGISTRY_USER` | your GitHub login | your GitHub login |
 | `REGISTRY_TOKEN` | a `read:packages` token (the same on both) | the same token |
+| `FQDN` | the console's public name, e.g. `console1.example.net` | not needed |
+| `ADMIN_EMAIL` | your real e-mail address, e.g. `xxxx@eu.equinix.com` | not needed |
 
-Optional: `LOCAL_ADDR` (this appliance's own IP towards the peer, e.g. `172.16.0.11`; needed when the peer is reached over a second interface), `MACSEC_IFACE` (e.g. `ens4`) and `LOCAL_TS` / `REMOTE_TS` (e.g. `10.1.0.0/24` / `10.2.0.0/24`). ACL: allow 22, UDP 500/4500, ESP, TCP 8443 and 8444 from the peer.
+Optional: `LOCAL_ADDR` (this appliance's own IP towards the peer, e.g. `172.16.0.11`; needed when the peer is reached over a second interface), `MACSEC_IFACE` (e.g. `ens4`) and `LOCAL_TS` / `REMOTE_TS` (e.g. `10.1.0.0/24` / `10.2.0.0/24`). ACL: allow 22, 80 and 443 (the master console and its certificate), UDP 500/4500, ESP, TCP 8443 and 8444 from the peer. Keep TCP 8080 closed.
 
 ## 3. Day 0 templates
 
@@ -53,8 +55,8 @@ Two templates, same structure. Both do what the k3s-node image's own Day 0 does,
 
 | Template | Use | Required parameters |
 |---|---|---|
-| [`day0/day0-encryptor-basic.yaml`](day0/day0-encryptor-basic.yaml) | **BASIC** (lab): bring up a pair quickly with the KME simulator | 5, the rest optional |
-| [`day0/day0-encryptor-advanced.yaml`](day0/day0-encryptor-advanced.yaml) | **ADVANCED**: real KME, per-site values | 8, the rest optional |
+| [`day0/day0-encryptor-basic.yaml`](day0/day0-encryptor-basic.yaml) | **BASIC** (lab): bring up a pair quickly with the KME simulator | 5, plus 2 on the master, the rest optional |
+| [`day0/day0-encryptor-advanced.yaml`](day0/day0-encryptor-advanced.yaml) | **ADVANCED**: real KME, per-site values | 8, plus 2 on the master, the rest optional |
 
 Equinix predefined (both): `hostname` `userName` `publicKey` `adminPwd` `ipAddressWithCidr` `gateway`. Declare every other variable as a custom parameter in the portal.
 
@@ -83,13 +85,16 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 | `STACK_TOKEN` | no | no | empty | leave empty | Read-only GitHub token, only for a private fork. |
 | `REGISTRY_USER` | yes | yes | - | `my-github-user` | GitHub login used to pull the private images from ghcr.io. Day 0 stops the encryptor install without it. |
 | `REGISTRY_TOKEN` | yes | yes | - | `ghp_AbCdEf1234567890AbCdEf1234567890AbCd` | Classic personal access token with only `read:packages`. Written to `/etc/rancher/k3s/registries.yaml` (root only) before k3s starts. Expires: set a reminder to rotate it. |
+| `FQDN` | master: yes | master: yes | - | `console1.example.net` | Master only (ignored on a slave). Public name of the console, served at `https://<FQDN>` with a Let's Encrypt certificate. Create the DNS record pointing to the master before booting, and keep port 80 reachable from the internet. |
+| `ADMIN_EMAIL` | master: yes | master: yes | - | `xxxx@eu.equinix.com` | Master only. Login name of the console, and contact address for the Let's Encrypt certificate: it must be a real address. |
+| `ADMIN_PASSWORD` | no | no | generated | `ChangeMe-2026` | Master only. Console password. Written to `/etc/encryptor/credentials.env` (root only). |
 
 BASIC uses plain HTTP for the KME and the peer API. ADVANCED does too when `KME_URL` is `http://`. Its simulator gives random keys, **not QKD**, with no authentication.
 
 | Template | ACL |
 |---|---|
-| BASIC | allow 22, UDP 500/4500, ESP, and TCP 8443 and 8444 from the peer only |
-| ADVANCED | allow 22, UDP 500/4500, ESP and TCP 8444 from the peer |
+| BASIC | allow 22, UDP 500/4500, ESP, and TCP 8443 and 8444 from the peer only; the master also needs 80 and 443 from anywhere |
+| ADVANCED | allow 22, UDP 500/4500, ESP and TCP 8444 from the peer; the master also needs 80 and 443 from anywhere |
 
 ## 4. Load KME certificates after boot
 
@@ -114,11 +119,12 @@ To rotate them, update the Secret (`... --dry-run=client -o yaml | sudo k3s kube
 
 ## 5. Console (master only)
 
-The master serves a small web console: the appliance pair as two nodes joined by the IPsec link, with the key rotation of each consumer. It runs inside the `qkd-exchange` container and listens only on the node's localhost, so you reach it through an SSH tunnel and it has no login.
+The master serves a small web console: the appliance pair as two nodes joined by the IPsec link, with the key rotation of each consumer. It runs inside the `qkd-exchange` container and is published at `https://<FQDN>` through Traefik with a Let's Encrypt certificate. It has its own login (`ADMIN_EMAIL` and `ADMIN_PASSWORD`).
 
 | Item | Detail |
 |---|---|
-| Open | `ssh -L 8080:localhost:8080 <user>@<node>`, then `http://localhost:8080` |
+| Open | `https://<FQDN>`, login `ADMIN_EMAIL` and the password in `/etc/encryptor/credentials.env` on the master (generated when `ADMIN_PASSWORD` is empty) |
+| Setup | Day 0 runs `scripts/console-setup.sh` on the master: the login (a PBKDF2 hash in Secret `console-auth`), Traefik's Let's Encrypt resolver with a persistent certificate store, and a Service, EndpointSlice and Ingress that point Traefik at the console on the node address (the Pod uses the host network) |
 | Master side | SAE, KME, peer SAE; consumers IPsec, MACsec, SSH with interval, sequence, last key age and state |
 | Slave side | greyed until you click "Link slave". The peer address is read-only, taken from the portal parameter `PEER_ADDR`. Linking checks that the peer answers on its API, then shows the slave's SAE and KME |
 | Fabric connection | a text label stored on the node (`/var/lib/encryptor/state/console.json`) and shown on the slave card. The service token and the virtual connection itself are created outside the node: it has no Fabric credentials and never reads the connection's real state |
@@ -127,8 +133,8 @@ The master serves a small web console: the appliance pair as two nodes joined by
 | Latency | median TCP connect time from the master to the peer API port (8444), measured every 5 seconds. It needs no ping tool or root |
 | IPsec and MACsec state | the `strongswan` and `macsec` containers publish them to a shared in-memory volume every 5 to 10 seconds; older than 40 seconds counts as unknown |
 | Rotate keys now | asks the master to fetch new keys for all consumers immediately; the slave follows through the normal stage and commit |
-| Protection | listens on 127.0.0.1 only; the Host header must be localhost; every change needs an `X-Console: 1` header that a foreign web page cannot send |
-| Slave nodes | have no console; their login banner shows the status |
+| Protection | login on every request, checked by the console itself (so its port is protected even if reached directly); Host header must be `FQDN` or localhost; every change needs an `X-Console: 1` header that a foreign web page cannot send; a wrong password costs one second. Keep TCP 8080 closed in the ACL: only Traefik (on the same node) needs it |
+| Slave nodes | have no console and need no `FQDN`; their login banner shows the status |
 
 ## 6. What was tested
 
@@ -137,7 +143,7 @@ The master serves a small web console: the appliance pair as two nodes joined by
 - Two `macsec` containers joined by a veth pair established MKA with GCM-AES-256 from a config generated by qkd-exchange. Ping passed and the wire carried 802.1AE frames.
 - The peer API ran over mutual TLS with generated certificates: `qkd-exchange` waited until the certificates existed, accepted the valid client, and refused a client with no certificate and one from another CA.
 - The console ran against the real simulator with a master and a slave: status, linking with a peer check, Rotate now, persistence, the Host and header guards, and the page in a headless browser (linked and not linked), with simulated tunnel and interface state files.
-- Two throwaway k3s nodes in Docker (v1.36.5, one master and one slave) ran the real manifest and the BASIC Day 0 logic: both Pods start with their three containers on the node's own address; the master's KME simulator serves keys; the master rotates and the slave applies; IKEv2 comes up with the quantum-key PPK and traffic crosses the ESP tunnel (packet counters match); with a virtual cable and `MACSEC_IFACE` set through the ConfigMap, MKA connects, `macsec0` is up with GCM-AES-256 and traffic crosses it; the console shows state, tests and links the slave, rotates keys on demand and refuses requests without its header or from another Host; it is not reachable from outside the node.
+- Two throwaway k3s nodes in Docker (v1.36.5, one master and one slave) ran the real manifest and the BASIC Day 0 logic: both Pods start with their three containers on the node's own address; the master's KME simulator serves keys; the master rotates and the slave applies; IKEv2 comes up with the quantum-key PPK and traffic crosses the ESP tunnel (packet counters match); with a virtual cable and `MACSEC_IFACE` set through the ConfigMap, MKA connects, `macsec0` is up with GCM-AES-256 and traffic crosses it; the console shows state, tests and links the slave, rotates keys on demand and refuses requests without its header or from another Host; it is published through the bundled Traefik at a test name: no login or a wrong password gives 401, the right login gives the page and the status, the Host and header guards hold, and the console's own port also asks for the login. The Let's Encrypt issuance itself was not tested (no real DNS).
 - The three images build, the manifest parses, and Day 0 renders and passes a shell syntax check.
 
 ## 7. Findings and limits

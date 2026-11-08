@@ -47,6 +47,7 @@ spec:
           volumeMounts:
             - { name: site, mountPath: /etc/qkd/config.json, subPath: config.json, readOnly: true }
             - { name: kme-tls, mountPath: /etc/qkd/tls, readOnly: true }
+            - { name: console-auth, mountPath: /etc/qkd/auth, readOnly: true }
             - { name: swanctl-conf-d, mountPath: /swanctl/conf.d }
             - { name: macsec, mountPath: /macsec }
             - { name: ssh, mountPath: /ssh }
@@ -56,6 +57,7 @@ spec:
       volumes:
         - { name: site, configMap: { name: site } }
         - { name: kme-tls, secret: { secretName: kme-tls, optional: true, defaultMode: 0400 } }
+        - { name: console-auth, secret: { secretName: console-auth, optional: true, defaultMode: 0400 } }   # master only: the console login
         - name: swanctl-main
           secret: { secretName: site-secrets, items: [{ key: swanctl.conf, path: swanctl.conf }], defaultMode: 0400 }
         - { name: swanctl-conf-d, emptyDir: { medium: Memory } }     # QKD keys stay in RAM, never on disk

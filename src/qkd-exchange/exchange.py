@@ -279,6 +279,32 @@ def probe(host, port, n=5):
             "min": round(ms[0], 1) if ms else None, "median": round(ms[len(ms) // 2], 1) if ms else None, "max": round(ms[-1], 1) if ms else None}
 
 
+def load_auth(path):
+    """Console login: a file with one line  user:pbkdf2:<iterations>:<salt hex>:<hash hex>  (written by Day 0)."""
+    try:
+        user, kind, it, salt, h = open(path).read().strip().split(":")
+        assert kind == "pbkdf2"
+        return {"user": user, "iter": int(it), "salt": bytes.fromhex(salt), "hash": bytes.fromhex(h)}
+    except (OSError, ValueError, AssertionError):
+        return None
+
+
+def check_login(header, creds):
+    """Basic auth against the stored hash; constant-time comparisons; a failure costs one second."""
+    ok = False
+    try:
+        scheme, _, b64 = (header or "").partition(" ")
+        user, _, pw = base64.b64decode(b64).decode().partition(":")
+        if scheme.lower() == "basic" and creds:
+            h = hashlib.pbkdf2_hmac("sha256", pw.encode(), creds["salt"], creds["iter"])
+            ok = hmac.compare_digest(h, creds["hash"]) & hmac.compare_digest(user.encode(), creds["user"].encode())
+    except Exception:  # noqa: BLE001
+        ok = False
+    if not ok:
+        time.sleep(1)
+    return ok
+
+
 class Console:
     def __init__(self, ex):
         self.ex, self.cfg = ex, ex.cfg.get("console", {})
@@ -289,6 +315,9 @@ class Console:
             self.state.update(json.load(open(self.persist)))
         except (OSError, ValueError):
             pass
+        self.hosts = {"localhost", "127.0.0.1", "::1"} | set(self.cfg.get("hosts", []))
+        self.auth_file = self.cfg.get("auth_file")          # set: every request needs the login (fail closed if the file is missing)
+        self.creds = load_auth(self.auth_file) if self.auth_file else None
         self._lat = (0, None)
         u = urllib.parse.urlparse(ex.cfg["peer"]["url"])
         self.peer_host, self.peer_port = u.hostname, u.port or 8444
@@ -352,7 +381,6 @@ class Console:
 
 def serve_console(con):
     cfg = con.cfg
-    host_ok = {"localhost", "127.0.0.1", "::1"}
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -363,9 +391,14 @@ def serve_console(con):
             self.send_response(code); self.send_header("Content-Type", ctype); self.send_header("Content-Length", str(len(b)))
             self.send_header("Cache-Control", "no-store"); self.end_headers(); self.wfile.write(b)
 
-        def _guard(self):                     # DNS-rebinding guard; state changes also need a header a foreign page cannot send
-            if urllib.parse.urlsplit("//" + self.headers.get("Host", "")).hostname not in host_ok:
+        def _guard(self):                     # Host guard (DNS rebinding), then the login when one is configured
+            if urllib.parse.urlsplit("//" + self.headers.get("Host", "")).hostname not in con.hosts:
                 self._send(403, {"error": "bad host"}); return False
+            if con.auth_file and not check_login(self.headers.get("Authorization"), con.creds):
+                b = b'{"error": "login required"}'
+                self.send_response(401); self.send_header("WWW-Authenticate", 'Basic realm="QKD Encryptor"')
+                self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(b)))
+                self.end_headers(); self.wfile.write(b); return False
             return True
 
         def do_GET(self):

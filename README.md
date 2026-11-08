@@ -60,16 +60,16 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 | `IKE_PSK` | yes | yes | - | `4f9c2a7e1b8d3c6a5e0f9b2d7c4a1e83` | IKEv2 secret, identical on both ends, never stored in the repo. The IPsec tunnel is always configured, so both templates refuse to start without it. Generate with `openssl rand -hex 16`. |
 | `REGISTRY_USER` | yes | yes | - | `my-github-user` | GitHub login used to pull the private images from ghcr.io. Day 0 stops the encryptor install without it. |
 | `REGISTRY_TOKEN` | yes | yes | - | `ghp_AbCdEf1234567890AbCdEf1234567890AbCd` | Classic personal access token with only `read:packages`. Written to `/etc/rancher/k3s/registries.yaml` (root only) before k3s starts. Expires: set a reminder to rotate it. |
-| `FQDN` | master: yes | master: yes | - | `console1.example.net` | Master only (ignored on a slave). Public name of the console, served at `https://<FQDN>` with a Let's Encrypt certificate. Create the DNS record pointing to the master before booting, and keep port 80 reachable from the internet. |
-| `ADMIN_EMAIL` | master: yes | master: yes | - | `xxxx@eu.equinix.com` | Master only. Login name of the console, and contact address for the Let's Encrypt certificate: it must be a real address. |
+| `FQDN` | yes | yes | - | `console1.example.net` | Master only (ignored on a slave). Public name of the console, served at `https://<FQDN>` with a Let's Encrypt certificate. Create the DNS record pointing to the master before booting, and keep port 80 reachable from the internet. |
+| `ADMIN_EMAIL` | yes | yes | - | `xxxx@eu.equinix.com` | Master only. Login name of the console, and contact address for the Let's Encrypt certificate: it must be a real address. |
 | `LOCAL_ADDR` | no | no | address of the default route | `172.16.0.11` | This appliance's own IP towards the peer. It is the IKE source address and the only address the peer API listens on. Set it when the peer is reached over a second interface or subnet. |
 | `LOCAL_TS` | no | no | `0.0.0.0/0` | `10.1.0.0/24` | Local protected subnet. |
 | `REMOTE_TS` | no | no | `0.0.0.0/0` | `10.2.0.0/24` | Remote protected subnet. |
 | `MACSEC_IFACE` | no | no | empty (no MACsec) | `ens4` | Host NIC for MACsec. |
 | `MACSEC_ADDR` | no | no | empty (no address) | `10.99.0.1/24` | CIDR on the macsec interface. |
 | `K3S_ROLE` | no | no | `single` | `single` | `single`: standalone node. `server`: control-plane node. `agent`: k3s worker node that joins an existing cluster; the encryptor is not installed on it. |
-| `K3S_SERVER_URL` | no (agent only) | no (agent only) | empty | `https://10.0.0.5:6443` | URL used by an agent to join the k3s cluster. Empty for `single` or the first `server`. |
-| `K3S_TOKEN` | no (agent only) | no (agent only) | empty | `K10abc123def456::server:789xyz` | Secret used to join the k3s cluster. |
+| `K3S_SERVER_URL` | no | no | empty | `https://10.0.0.5:6443` | Agent only. URL used by an agent to join the k3s cluster. Empty for `single` or the first `server`. |
+| `K3S_TOKEN` | no | no | empty | `K10abc123def456::server:789xyz` | Agent only. Secret used to join the k3s cluster. |
 | `K3S_TLS_SAN` | no | no | empty | `172.16.0.11` | Extra name or IP in the k3s API server certificate, for `kubectl` or agents reaching port 6443 from outside. Not needed for local `sudo k3s kubectl`. |
 | `ADMIN_PASSWORD` | no | no | generated | `ChangeMe-2026` | Master only. Console password. Written to `/etc/encryptor/credentials.env` (root only). |
 

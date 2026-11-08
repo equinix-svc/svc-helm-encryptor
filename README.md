@@ -35,20 +35,6 @@ One master/slave pair rotates keys. The master requests keys from its KME, sends
 | 5. Check | On the node: `curl -fsSL https://raw.githubusercontent.com/equinix-svc/svc-helm-encryptor/main/scripts/check-install.sh \| sudo bash`. It is read-only, prints PASS/FAIL and never prints secrets. |
 | Login banner | Shown on each interactive SSH login: role, peer, KME, live status (pods, IPsec SA, last key), the JSON status endpoints (peer API, KME simulator on the BASIC master) and tips. Installed by Day 0 from `scripts/motd.sh` into `/etc/profile.d/`; never shows a secret. On an existing node: `sudo curl -fsSL https://raw.githubusercontent.com/equinix-svc/svc-helm-encryptor/main/scripts/motd.sh -o /etc/profile.d/qkd-encryptor-motd.sh` |
 
-BASIC, one appliance of each role (the master also runs the KME simulator):
-
-| Parameter | Master | Slave |
-|---|---|---|
-| `QKD_ROLE` | `master` | `slave` |
-| `PEER_ADDR` | the slave's IP, e.g. `172.16.0.12` | the master's IP, e.g. `172.16.0.11` |
-| `IKE_PSK` | the same secret, e.g. `openssl rand -hex 16` | the same secret |
-| `REGISTRY_USER` | your GitHub login | your GitHub login |
-| `REGISTRY_TOKEN` | a `read:packages` token (the same on both) | the same token |
-| `FQDN` | the console's public name, e.g. `console1.example.net` | not needed |
-| `ADMIN_EMAIL` | your real e-mail address, e.g. `xxxx@eu.equinix.com` | not needed |
-
-Optional: `LOCAL_ADDR` (this appliance's own IP towards the peer, e.g. `172.16.0.11`; needed when the peer is reached over a second interface), `MACSEC_IFACE` (e.g. `ens4`) and `LOCAL_TS` / `REMOTE_TS` (e.g. `10.1.0.0/24` / `10.2.0.0/24`). ACL: allow 22, 80 and 443 (the master console and its certificate), UDP 500/4500, ESP, TCP 8443 and 8444 from the peer. Keep TCP 8080 closed.
-
 ## 3. Day 0 templates
 
 Two templates, same structure. Both do what the k3s-node image's own Day 0 does, then on a `single` node or the first `server` create ConfigMap `site` and Secret `site-secrets` in namespace `encryptor` and download `encryptor.yaml` (and `dev-kme-sim.yaml` on the BASIC master) into the k3s manifests directory. Render locally with `DAY0_FILE=<file> scripts/render-day0.sh`. Log: `/var/log/day0.log`.

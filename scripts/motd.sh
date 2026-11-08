@@ -9,7 +9,7 @@ fi
 export QKDENC_MOTD_SHOWN=1
 
 _qkdenc_motd() {
-  local B="" D="" G="" Y="" N="" ip host cfg role sae peer kme sim pods_r pods_t pstat sas klog last age scheme
+  local B="" D="" G="" Y="" N="" bindaddr ip host cfg role sae peer kme sim pods_r pods_t pstat sas klog last age scheme
   if [ -z "${NO_COLOR:-}" ]; then B=$'\e[1m'; D=$'\e[2m'; G=$'\e[32m'; Y=$'\e[33m'; N=$'\e[0m'; fi
   _k() {   # kubectl as the login user (kubeconfig copied by Day 0), else sudo; never blocks the login for long
     if [ -r "$HOME/.kube/config" ]; then KUBECONFIG="$HOME/.kube/config" timeout 3 k3s kubectl "$@" 2>/dev/null
@@ -28,6 +28,8 @@ except Exception:
     print("? ? ? ?")' 2>/dev/null)
   peeraddr=$(printf '%s' "$cfg" | python3 -c 'import json,sys;print(json.load(sys.stdin)["peer"]["url"].split("//")[1].split(":")[0])' 2>/dev/null)
   scheme=$(printf '%s' "$cfg" | python3 -c 'import json,sys;print(json.load(sys.stdin)["peer"]["url"].split(":")[0])' 2>/dev/null)
+  bindaddr=$(printf '%s' "$cfg" | python3 -c 'import json,sys;print(json.load(sys.stdin)["peer"].get("bind",""))' 2>/dev/null)
+  [ -n "$bindaddr" ] && ip=$bindaddr          # LOCAL_ADDR: the peer API listens only there
 
   read -r pods_r pods_t < <(_k -n encryptor get pods --no-headers | awk '$3!="Terminating"{t++; split($2,a,"/"); if($3=="Running" && a[1]==a[2]) r++} END{print r+0, t+0}')
   sas=$(_k -n encryptor exec deploy/encryptor -c strongswan -- swanctl --list-sas 2>/dev/null | grep -c ESTABLISHED)
@@ -52,6 +54,7 @@ except Exception:
   fi
   printf '  Status      %s\n\n' "$pstat"
   [ -n "$scheme" ] && printf '  %sWEB INTERFACES%s\n' "$B" "$N"
+  [ "$role" = slave ] && printf '  %-15s %-38s %s\n' "Console" "none on a slave" "open the console on the master (${peeraddr})"
   [ "$role" = master ] && printf '  %-15s %-38s %s\n' "Console" "http://localhost:8080" "SSH tunnel: ssh -L 8080:localhost:8080 ${USER:-<user>}@$ip"
   [ -n "$scheme" ] && printf '  %-15s %-38s %s\n' "Peer API"   "$scheme://$ip:8444/v1/status" "JSON, key rotation state (mTLS in ADVANCED)"
   [ -n "$sim" ] && [ -n "$peer" ] && printf '  %-15s %-38s %s\n' "KME simulator" "http://$ip:8443/api/v1/keys/$peer/status" "JSON, ETSI 014 status (lab, BASIC master)"

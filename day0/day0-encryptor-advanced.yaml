@@ -199,6 +199,8 @@ write_files:
       }
       EXTRA=""; [ "${INSTALL_KME_SIM:-}" = yes ] && EXTRA=dev-kme-sim.yaml
       for f in encryptor.yaml $EXTRA; do fetch "$f"; done
+      # the lab KME simulator listens only on LOCAL_ADDR when it is set (the peer-facing address), not on every address
+      [ -n "$EXTRA" ] && [ -n "${LOCAL_ADDR:-}" ] && sed -i 's#args: \[sim, --port, "8443"\]#args: [sim, --bind, "'"$LOCAL_ADDR"'", --port, "8443"]#' "$MAN/dev-kme-sim.yaml"
       # Login banner (best effort: never stops the install)
       curl -fsSL --retry 3 -H "Accept: application/vnd.github.raw" \
         "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/scripts/motd.sh" -o /etc/profile.d/qkd-encryptor-motd.sh \

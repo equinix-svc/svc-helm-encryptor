@@ -470,7 +470,7 @@ def run(path):
 
 
 # ---------------------------------------------------------------- KME simulator (tests only)
-def sim(port):
+def sim(port, bind="0.0.0.0"):
     store, lock = {}, threading.Lock()
 
     class H(BaseHTTPRequestHandler):
@@ -515,8 +515,8 @@ def sim(port):
             self.send_response(code); self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
-    log.warning("KME simulator on :%d - keys are random and in memory, NOT QKD", port)
-    ThreadingHTTPServer(("0.0.0.0", port), H).serve_forever()
+    log.warning("KME simulator on %s:%d - keys are random and in memory, NOT QKD", bind, port)
+    make_server(bind, port, H, "KME simulator").serve_forever()
 
 
 if __name__ == "__main__":
@@ -524,6 +524,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run"); r.add_argument("-c", "--config", default="/etc/qkd/config.json")
-    s = sub.add_parser("sim"); s.add_argument("--port", type=int, default=8443)
+    s = sub.add_parser("sim"); s.add_argument("--port", type=int, default=8443); s.add_argument("--bind", default="0.0.0.0")
     a = ap.parse_args()
-    run(a.config) if a.cmd == "run" else sim(a.port)
+    run(a.config) if a.cmd == "run" else sim(a.port, a.bind)

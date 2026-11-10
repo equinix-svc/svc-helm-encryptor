@@ -138,7 +138,7 @@ The master serves a small web console: the appliance pair as two nodes joined by
 - **PPK timing:** a new PPK only takes effect at the next IKE reauthentication, not on child-SA rekeys.
 - **PPK ID:** it is fixed, so a brief key-switch window can fail an authentication. That is retried.
 - **SSH:** QKD can't plug into the SSH transport itself. qkd-exchange only rotates key pairs, and you still need to wire them into `sshd` or a CA.
-- **Public name:** the DNS wait was tested with stand-ins for DNS and the node's addresses; the certificate issuance itself has not been tested. `sudo cat /etc/encryptor/dns-wait.state` shows the state, and `check-install.sh` shows the certificate issuer.
+- **Public name:** Let's Encrypt issued the console certificate on a real node. Traefik requests it about a second after it starts, so its Deployment uses the `Recreate` strategy and its Service publishes not-ready addresses; otherwise the validation reaches the old pod or no pod and fails. `sudo cat /etc/encryptor/dns-wait.state` shows the state, and `check-install.sh` shows the certificate issuer.
 - **Untested:** a real KME (certificate and SAE ID mapping vary by vendor), the images pulled from ghcr.io on a real node, Equinix Network Edge devices, and the Fabric link between them (including whether the virtual switch passes MACsec frames).
 - **IKE authentication:** it uses a shared secret (`IKE_PSK`) for now. Certificates would be better for production.
 - **Day 0 size:** the templates are about 14 KB, under the portal limit of 20,000 characters. No certificate goes through Day 0.

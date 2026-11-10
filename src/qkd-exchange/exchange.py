@@ -455,10 +455,22 @@ def wait_for_files(cfg):
         time.sleep(10)
 
 
+def serve_health(port=8445):
+    """Liveness endpoint on the loopback only: 200 while the process runs. The peer API and the console listen on addresses
+    that may not exist yet (LOCAL_ADDR), so the probe must not depend on them."""
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200); self.send_header("Content-Length", "2"); self.end_headers(); self.wfile.write(b"ok")
+        def log_message(self, *a):
+            pass
+    make_server("127.0.0.1", port, H, "health").serve_forever()
+
+
 def run(path):
     cfg = json.load(open(path))
     wait_for_files(cfg)
     ex = Exchange(cfg)
+    threading.Thread(target=serve_health, daemon=True).start()
     threading.Thread(target=serve_peer, args=(ex,), daemon=True).start()
     for c in cfg["consumers"]:
         if c["role"] == "master":

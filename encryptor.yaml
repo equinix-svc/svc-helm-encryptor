@@ -43,7 +43,7 @@ spec:
           image: ghcr.io/equinix-svc/svc-helm-encryptor/qkd-exchange:0.1.0
           securityContext: { runAsUser: 0 }    # writes files shared with the root-owned containers above
           ports: [{ containerPort: 8444, hostPort: 8444 }]
-          livenessProbe: { tcpSocket: { port: 8444 }, periodSeconds: 30 }
+          livenessProbe: { httpGet: { host: 127.0.0.1, port: 8445, path: /healthz }, periodSeconds: 30, failureThreshold: 3 }
           volumeMounts:
             - { name: site, mountPath: /etc/qkd/config.json, subPath: config.json, readOnly: true }
             - { name: kme-tls, mountPath: /etc/qkd/tls, readOnly: true }

@@ -108,8 +108,10 @@ write_files:
       case "$QKD_ROLE" in master) PEER_ROLE=slave ;; slave) PEER_ROLE=master ;; *) echo "QKD_ROLE must be master|slave"; exit 1 ;; esac
       NODE_IP="${LOCAL_ADDR:-$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')}"
       BIND=""; [ -n "${LOCAL_ADDR:-}" ] && BIND=',"bind":"'"$LOCAL_ADDR"'"'
-      # the console and Traefik only need an address that always exists; LOCAL_ADDR is for the peer side and must be configured on an interface
-      CONSOLE_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')"
+      # the console listens on the pod-network gateway of this node (cni0, first address of the node's pod range), so only Traefik
+      # (https://FQDN) reaches it and nothing is open on the public address. LOCAL_ADDR is for the peer side and must be on an interface.
+      PODCIDR="$($K get node -o jsonpath='{.items[0].spec.podCIDR}' 2>/dev/null || true)"
+      CONSOLE_IP="$(printf '%s' "${PODCIDR:-10.42.0.0/24}" | cut -d/ -f1 | awk -F. '{print $1"."$2"."$3"."$4+1}')"
       if [ -n "${LOCAL_ADDR:-}" ] && ! ip -4 -o addr show | grep -qw "$LOCAL_ADDR"; then echo "WARNING: LOCAL_ADDR $LOCAL_ADDR is not set on any interface; the peer API and IPsec wait until it exists"; fi
 
       W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT

@@ -118,6 +118,7 @@ The master serves a small web console: the appliance pair as two nodes joined by
 | IPsec and MACsec state | the `strongswan` and `macsec` containers publish them to a shared in-memory volume every 5 to 10 seconds; older than 40 seconds counts as unknown |
 | Rotate keys now | asks the master to fetch new keys for all consumers immediately; the slave follows through the normal stage and commit |
 | Protection | login on every request, checked by the console itself (so its port is protected even if reached directly); Host header must be `FQDN` or localhost; every change needs an `X-Console: 1` header that a foreign web page cannot send; a wrong password costs one second. Keep TCP 8080 closed in the ACL: only Traefik (on the same node) needs it |
+| Listening address | port 8080 on the node's pod-network gateway (the first address of its pod range, `10.42.0.1` on a single node), so only Traefik reaches it. Like the daihub stack, the node exposes 80 and 443 for the web interface and nothing else on its public address |
 | Slave nodes | have no console and need no `FQDN`; their login banner shows the status |
 
 ## 6. What was tested

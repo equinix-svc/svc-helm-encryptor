@@ -188,6 +188,17 @@ class Exchange:
         return {"sae_id": self.cfg["sae_id"], "kme": self.cfg["kme"]["url"], "consumers": self.state}
 
 
+def make_server(addr, port, handler, what):
+    """Listen on addr:port. If the address does not exist yet (an interface still coming up), keep trying instead of
+    stopping the whole process: the other services of the appliance keep running meanwhile."""
+    while True:
+        try:
+            return ThreadingHTTPServer((addr, port), handler)
+        except OSError as e:
+            log.error("%s: cannot listen on %s:%s (%s); retrying in 15 s", what, addr, port, e)
+            time.sleep(15)
+
+
 def serve_peer(ex):
     cfg = ex.cfg["peer"]
 
@@ -212,7 +223,7 @@ def serve_peer(ex):
                 log.error("peer %s failed: %s", self.path, e)
                 self._send(400, {"error": str(e)})
 
-    srv = ThreadingHTTPServer((cfg.get("bind", "0.0.0.0"), cfg.get("listen", 8444)), H)
+    srv = make_server(cfg.get("bind", "0.0.0.0"), cfg.get("listen", 8444), H, "peer API")
     if cfg.get("cert"):
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(cfg["cert"], cfg["key"])
@@ -430,7 +441,7 @@ def serve_console(con):
             except Exception as e:  # noqa: BLE001
                 self._send(400, {"error": str(e)})
 
-    srv = ThreadingHTTPServer((cfg.get("bind", "127.0.0.1"), cfg.get("port", 8080)), H)
+    srv = make_server(cfg.get("bind", "127.0.0.1"), cfg.get("port", 8080), H, "console")
     log.info("console on http://%s:%s (master only)", cfg.get("bind", "127.0.0.1"), cfg.get("port", 8080))
     srv.serve_forever()
 

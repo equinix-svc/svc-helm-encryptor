@@ -108,6 +108,9 @@ write_files:
       case "$QKD_ROLE" in master) PEER_ROLE=slave ;; slave) PEER_ROLE=master ;; *) echo "QKD_ROLE must be master|slave"; exit 1 ;; esac
       NODE_IP="${LOCAL_ADDR:-$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')}"
       BIND=""; [ -n "${LOCAL_ADDR:-}" ] && BIND=',"bind":"'"$LOCAL_ADDR"'"'
+      # the console and Traefik only need an address that always exists; LOCAL_ADDR is for the peer side and must be configured on an interface
+      CONSOLE_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')"
+      if [ -n "${LOCAL_ADDR:-}" ] && ! ip -4 -o addr show | grep -qw "$LOCAL_ADDR"; then echo "WARNING: LOCAL_ADDR $LOCAL_ADDR is not set on any interface; the peer API and IPsec wait until it exists"; fi
 
       W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
       # https:// KME = mutual TLS. The certificates are NOT passed through Day 0: load them after boot into Secret kme-tls
@@ -118,7 +121,7 @@ write_files:
       esac
 
       # console (page + status API) only on the master: listens on the node address, behind Traefik (https://FQDN) and its own login
-      CONSOLE=""; [ "$QKD_ROLE" = master ] && CONSOLE='"console":{"bind":"'"$NODE_IP"'","port":8080,"hosts":["'"$FQDN"'"],"auth_file":"/etc/qkd/auth/auth"},'
+      CONSOLE=""; [ "$QKD_ROLE" = master ] && CONSOLE='"console":{"bind":"'"$CONSOLE_IP"'","port":8080,"hosts":["'"$FQDN"'"],"auth_file":"/etc/qkd/auth/auth"},'
 
       # --- exchange config: three consumers, same role on all of them
       INT=3600
@@ -202,7 +205,7 @@ write_files:
       if [ "$QKD_ROLE" = master ]; then
         curl -fsSL --retry 3 -H "Accept: application/vnd.github.raw" \
           "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/scripts/console-setup.sh" -o /usr/local/bin/day0-console.sh \
-          && K="$K" MAN="$MAN" NODE_IP="$NODE_IP" FQDN="$FQDN" ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="${ADMIN_PASSWORD:-}" bash /usr/local/bin/day0-console.sh \
+          && K="$K" MAN="$MAN" NODE_IP="$CONSOLE_IP" FQDN="$FQDN" ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="${ADMIN_PASSWORD:-}" bash /usr/local/bin/day0-console.sh \
           || { echo "console setup failed (see above)"; exit 1; }
       fi
 

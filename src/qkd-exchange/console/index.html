@@ -62,6 +62,7 @@
   .kme text.t { fill:#fff; font-size:15px; font-weight:500; } .kme text.s { fill:#a4a6ab; font-size:12px; } .kme.off text.t, .kme.off text.s { fill:#6f7176; }
   .klink { stroke:var(--cyan); stroke-width:2; fill:none; } .klink.down { stroke:var(--red); stroke-dasharray:8 6; } .klink.off { stroke:#55575c; stroke-dasharray:3 7; }
   .laptop rect { fill:#2f3136; stroke:#b9bcc2; stroke-width:1.5; } .laptop.off rect { stroke:#55575c; stroke-dasharray:6 5; } .laptop text.t { fill:#fff; font-size:15px; font-weight:500; } .laptop text.s { fill:#a4a6ab; font-size:12px; } .laptop.off text.t, .laptop.off text.s { fill:#6f7176; }
+  .laptop text.ok { fill:var(--green); } .laptop text.bad { fill:#ff8f9a; }
   .lan { stroke:#8a8d93; stroke-width:2; fill:none; } .lan.off { stroke:#55575c; stroke-dasharray:3 7; }
   .qlink { stroke:#8a8d93; stroke-width:2; stroke-dasharray:2 6; fill:none; } svg text.lbl { fill:#c9c6cf; font-size:12px; }
   .linkbox rect { fill:#1f2023; stroke:#55575c; } .linkbox text { fill:#e8e8e8; font-size:12px; } .linkbox text.h { fill:var(--cyan); font-weight:600; }
@@ -81,11 +82,11 @@
   <span class="grow"></span>
   <span class="crumb"><span class="dot" id="dot"></span><b id="status">Connecting...</b></span>
 </div>
-<div class="top2"><span class="crumb">Master <b id="crumbSae">-</b></span><span class="grow"></span><span class="crumb" id="clock"></span></div>
+<div class="top2"><span class="crumb">Encryptor (Master) <b id="crumbSae">-</b></span><span class="grow"></span><span class="crumb" id="clock"></span></div>
 <div class="wrap">
   <aside>
     <div class="card first">
-      <h2>Master <span style="font-size:13px;color:var(--side-dim)">(this appliance)</span></h2>
+      <h2>Encryptor (Master) <span style="font-size:13px;color:var(--side-dim)">(this appliance)</span></h2>
       <div class="chips"><span class="chip on">IPsec</span><span class="chip on">MACsec</span><span class="chip on">SSH</span></div>
       <div class="kv">SAE <b id="mSae">-</b></div>
       <div class="kv">KME <b id="mKme">-</b></div>
@@ -93,7 +94,7 @@
       <div class="kv" id="mLanRow" hidden>Laptop <b id="mLan">-</b></div>
     </div>
     <div class="card off" id="slaveCard">
-      <h2>Slave <span style="font-size:13px;color:var(--side-dim)" id="slaveHint">(not linked)</span></h2>
+      <h2>Encryptor (Slave) <span style="font-size:13px;color:var(--side-dim)" id="slaveHint">(not linked)</span></h2>
       <div class="chips"><span class="chip">IPsec</span><span class="chip">MACsec</span><span class="chip">SSH</span></div>
       <div class="kv" id="sLanRow" hidden>Laptop <b id="sLan">-</b></div>
       <div class="kv" id="sInfo" hidden>SAE <b id="sSae">-</b> &middot; KME <b id="sKme">-</b></div>
@@ -142,8 +143,8 @@ function draw() {
   const g = el('g', {transform: S.laptop ? 'translate(0,100)' : 'translate(0,0)'}); root.append(g);
   const linked = S.link.linked, ip = S.ipsec;
   const cls = !linked ? 'off' : ip.state === 'established' ? '' : 'down';
-  node(g, 40, 95, 'Master', S.sae_id, ['IPsec', 'MACsec', 'SSH'], false);
-  node(g, 630, 95, 'Slave', linked && S.peer && S.peer.sae_id ? S.peer.sae_id : (linked ? S.peer_sae : 'not linked'), ['IPsec', 'MACsec', 'SSH'], !linked);
+  node(g, 40, 95, 'Encryptor (Master)', S.sae_id, ['IPsec', 'MACsec', 'SSH'], false);
+  node(g, 630, 95, 'Encryptor (Slave)', linked && S.peer && S.peer.sae_id ? S.peer.sae_id : (linked ? S.peer_sae : 'not linked'), ['IPsec', 'MACsec', 'SSH'], !linked);
   g.append(el('line', {x1: 270, y1: 160, x2: 630, y2: 160, class: 'link ' + cls}));
   const k = el('g', {class: 'linkbox'}); k.append(el('rect', {x: 330, y: 100, width: 240, height: 130, rx: 3}));
   const lines = !linked ? ['IPsec link', 'waiting for the slave', S.peer_addr || ''] :
@@ -155,22 +156,18 @@ function draw() {
   kmes(g, linked);
   if (S.laptop) laptops(root, linked);
 }
-function laptopbox(g, x, y, title, sub, off) {
+function laptopbox(g, x, y, title, sub, res, ok, off) {
   const n = el('g', {class: 'laptop' + (off ? ' off' : '')});
-  n.append(el('rect', {x, y, width: 230, height: 62, rx: 3}), el('text', {x: x + 16, y: y + 26, class: 't'}, title), el('text', {x: x + 16, y: y + 47, class: 's'}, sub));
+  n.append(el('rect', {x, y, width: 230, height: 72, rx: 3}), el('text', {x: x + 16, y: y + 26, class: 't'}, title), el('text', {x: x + 16, y: y + 46, class: 's'}, sub),
+           el('text', {x: x + 16, y: y + 63, class: 's ' + (off ? '' : ok ? 'ok' : 'bad')}, res));
   g.append(n);
 }
+const lres = st => st && st.ok ? 'to ' + st.peer + '  \u00b7  ' + st.ms + ' ms via tunnel' : 'to ' + (st ? st.peer : '-') + '  \u00b7  no answer';
 function laptops(g, linked) {
   const L = S.laptop, pl = linked && S.peer && !S.peer.error ? S.peer.laptop : null;
-  laptopbox(g, 40, 6, 'Laptop (simulated)', L.addr + '  \u00b7  LOCAL_TS ' + (L.local_ts || ''), false);
-  laptopbox(g, 630, 6, 'Laptop (simulated)', L.peer + '  \u00b7  REMOTE_TS ' + (L.remote_ts || ''), !linked);
-  g.append(el('line', {x1: 155, y1: 68, x2: 155, y2: 195, class: 'lan'}), el('line', {x1: 745, y1: 68, x2: 745, y2: 195, class: !linked ? 'lan off' : 'lan'}));
-  const dir = (y, from, to, st, known) => {
-    g.append(el('line', {x1: 270, y1: y, x2: 630, y2: y, class: 'klink ' + (!known ? 'off' : st && st.ok ? '' : 'down')}));
-    g.append(el('text', {x: 450, y: y - 6, class: 'lbl', 'text-anchor': 'middle'}, from + ' \u2192 ' + to + '  \u00b7  ' + (!known ? 'not linked' : st && st.ok ? st.ms + ' ms, through the tunnel' : 'no answer')));
-  };
-  dir(30, L.addr, L.peer, L, true);
-  dir(56, L.peer, L.addr, pl, !!pl);
+  laptopbox(g, 40, 6, 'Laptop (simulated)', L.addr + '  \u00b7  LOCAL_TS ' + (L.local_ts || ''), lres(L), L.ok, false);
+  laptopbox(g, 630, 6, 'Laptop (simulated)', L.peer + '  \u00b7  REMOTE_TS ' + (L.remote_ts || ''), pl ? lres(pl) : 'not linked', pl && pl.ok, !linked);
+  g.append(el('line', {x1: 155, y1: 78, x2: 155, y2: 195, class: 'lan'}), el('line', {x1: 745, y1: 78, x2: 745, y2: 195, class: !linked ? 'lan off' : 'lan'}));
 }
 const hp = u => { try { const x = new URL(u); return x.host; } catch (e) { return u || '-'; } };
 function kmebox(g, x, y, w, title, sub, off) {
@@ -190,11 +187,12 @@ function kmes(g, linked) {
     g.append(el('text', {x: 165, y: 300, class: 'lbl'}, kt(true, S.kme_ms)), el('text', {x: 735, y: 300, class: 'lbl', 'text-anchor': 'end'}, kt(true, pk ? S.peer.kme_ms : null)));
     return;
   }
-  kmebox(g, 40, 330, 230, 'QKD appliance (KME)', hp(mine), false);
-  kmebox(g, 630, 330, 230, 'QKD appliance (KME)', pk ? hp(pk) : 'not linked', !pk);
+  const simA = !!S.kme_sim, simB = !!(pk && S.peer.kme_sim);
+  kmebox(g, 40, 330, 230, simA ? 'KME simulator (lab)' : 'QKD appliance (KME)', hp(mine) + (simA ? ' \u00b7 not QKD' : ''), false);
+  kmebox(g, 630, 330, 230, simB ? 'KME simulator (lab)' : 'QKD appliance (KME)', pk ? hp(pk) + (simB ? ' \u00b7 not QKD' : '') : 'not linked', !pk);
   g.append(el('line', {x1: 155, y1: 225, x2: 155, y2: 330, class: kc(true, mOk)}), el('line', {x1: 745, y1: 225, x2: 745, y2: 330, class: kc(!!pk, sOk)}));
   g.append(el('text', {x: 167, y: 283, class: 'lbl'}, kt(true, S.kme_ms)), el('text', {x: 757, y: 283, class: 'lbl'}, kt(!!pk, pk ? S.peer.kme_ms : null)));
-  g.append(el('line', {x1: 270, y1: 365, x2: 630, y2: 365, class: 'qlink'}), el('text', {x: 450, y: 358, class: 'lbl', 'text-anchor': 'middle'}, 'QKD link (not monitored)'));
+  g.append(el('line', {x1: 270, y1: 365, x2: 630, y2: 365, class: 'qlink'}), el('text', {x: 450, y: 358, class: 'lbl', 'text-anchor': 'middle'}, (simA && simB ? 'QKD link (simulated)' : 'QKD link (not monitored)')));
 }
 function table() {
   const T = $('#table'); T.innerHTML = '';

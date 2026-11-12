@@ -256,7 +256,7 @@ class Exchange:
         log.info("%s: applied seq=%d key_id=%s", c["name"], b["seq"], key_id)
 
     def status(self):
-        return {"sae_id": self.cfg["sae_id"], "kme": self.cfg["kme"]["url"], "kme_ms": self.kme_ms, "laptop": self.laptop, "consumers": self.state}
+        return {"sae_id": self.cfg["sae_id"], "kme": self.cfg["kme"]["url"], "kme_ms": self.kme_ms, "kme_sim": bool(self.cfg["kme"].get("sim")), "laptop": self.laptop, "consumers": self.state}
 
 
 def make_server(addr, port, handler, what):
@@ -427,7 +427,7 @@ class Console:
                "peer_sae": next(iter(ex.cons.values()))["peer_sae"], "consumers": mine,
                "ipsec": parse_ipsec(read_state(self.cfg.get("ipsec_file", "/state/ipsec.txt"))),
                "macsec": parse_macsec(read_state(self.cfg.get("macsec_file", "/state/macsec.txt"))),
-               "latency_ms": self.latency(), "kme_ms": ex.kme_ms, "laptop": ex.laptop, "link": dict(self.state), "peer": None}
+               "latency_ms": self.latency(), "kme_ms": ex.kme_ms, "kme_sim": bool(ex.cfg["kme"].get("sim")), "laptop": ex.laptop, "link": dict(self.state), "peer": None}
         if self.state["linked"]:
             try:
                 out["peer"] = ex.peer_get("/v1/status")
@@ -564,7 +564,9 @@ def run(path):
 
 
 # ---------------------------------------------------------------- KME simulator (tests only)
-def sim(port, bind="0.0.0.0"):
+def sim(port, bind="0.0.0.0", peer=None):
+    """Lab KME. With --peer it models the QKD link between two sites: a key that was generated here (enc_keys) is handed to the
+    peer simulator when its application asks for that key_ID (dec_keys), exactly once, like keys shared through a quantum link."""
     store, lock = {}, threading.Lock()
 
     class H(BaseHTTPRequestHandler):
@@ -575,7 +577,14 @@ def sim(port, bind="0.0.0.0"):
             u = urllib.parse.urlparse(self.path); q = urllib.parse.parse_qs(u.query)
             parts = u.path.strip("/").split("/")          # api v1 keys <sae> <op>
             out, code = {}, 200
-            if len(parts) == 5 and parts[:3] == ["api", "v1", "keys"]:
+            if len(parts) == 3 and parts[:2] == ["sim", "key"]:   # the simulated QKD link: the peer simulator takes a key
+                with lock:
+                    k = store.pop(parts[2], None)
+                if k is None:
+                    code = 404
+                else:
+                    out = {"key": base64.b64encode(k).decode()}
+            elif len(parts) == 5 and parts[:3] == ["api", "v1", "keys"]:
                 op = parts[4]
                 if op == "status":
                     out = {"source_KME_ID": "SIM", "target_KME_ID": "SIM", "master_SAE_ID": "sim",
@@ -596,6 +605,12 @@ def sim(port, bind="0.0.0.0"):
                     for kid in q.get("key_ID", []):
                         with lock:
                             k = store.pop(kid, None)      # one-time delivery, like a real KME
+                        if k is None and peer:
+                            try:
+                                with urllib.request.urlopen(peer.rstrip("/") + "/sim/key/" + urllib.parse.quote(kid), timeout=3) as r:
+                                    k = base64.b64decode(json.load(r)["key"])
+                            except Exception:  # noqa: BLE001 - unknown there too: reported below
+                                k = None
                         if k is None:
                             code, out = 400, {"message": "unknown key_ID " + kid}; break
                         keys.append({"key_ID": kid, "key": base64.b64encode(k).decode()})
@@ -609,7 +624,7 @@ def sim(port, bind="0.0.0.0"):
             self.send_response(code); self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
-    log.warning("KME simulator on %s:%d - keys are random and in memory, NOT QKD", bind, port)
+    log.warning("KME simulator on %s:%d (peer %s) - keys are random and in memory, NOT QKD", bind, port, peer or "none")
     make_server(bind, port, H, "KME simulator").serve_forever()
 
 
@@ -618,6 +633,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run"); r.add_argument("-c", "--config", default="/etc/qkd/config.json")
-    s = sub.add_parser("sim"); s.add_argument("--port", type=int, default=8443); s.add_argument("--bind", default="0.0.0.0")
+    s = sub.add_parser("sim"); s.add_argument("--port", type=int, default=8443); s.add_argument("--bind", default="0.0.0.0"); s.add_argument("--peer", default=None)
     a = ap.parse_args()
-    run(a.config) if a.cmd == "run" else sim(a.port, a.bind)
+    run(a.config) if a.cmd == "run" else sim(a.port, a.bind, a.peer)

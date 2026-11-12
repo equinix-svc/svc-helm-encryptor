@@ -256,7 +256,7 @@ class Exchange:
         log.info("%s: applied seq=%d key_id=%s", c["name"], b["seq"], key_id)
 
     def status(self):
-        return {"sae_id": self.cfg["sae_id"], "kme": self.cfg["kme"]["url"], "kme_ms": self.kme_ms, "kme_sim": bool(self.cfg["kme"].get("sim")), "laptop": self.laptop, "consumers": self.state}
+        return {"sae_id": self.cfg["sae_id"], "kme": self.cfg["kme"]["url"], "addr": self.cfg["peer"].get("bind"), "kme_ms": self.kme_ms, "kme_sim": bool(self.cfg["kme"].get("sim")), "laptop": self.laptop, "consumers": self.state}
 
 
 def make_server(addr, port, handler, what):
@@ -427,7 +427,7 @@ class Console:
                "peer_sae": next(iter(ex.cons.values()))["peer_sae"], "consumers": mine,
                "ipsec": parse_ipsec(read_state(self.cfg.get("ipsec_file", "/state/ipsec.txt"))),
                "macsec": parse_macsec(read_state(self.cfg.get("macsec_file", "/state/macsec.txt"))),
-               "latency_ms": self.latency(), "kme_ms": ex.kme_ms, "kme_sim": bool(ex.cfg["kme"].get("sim")), "laptop": ex.laptop, "link": dict(self.state), "peer": None}
+               "latency_ms": self.latency(), "addr": ex.cfg["peer"].get("bind"), "kme_ms": ex.kme_ms, "kme_sim": bool(ex.cfg["kme"].get("sim")), "laptop": ex.laptop, "link": dict(self.state), "peer": None}
         if self.state["linked"]:
             try:
                 out["peer"] = ex.peer_get("/v1/status")

@@ -89,6 +89,7 @@
       <h2>Encryptor (Master) <span style="font-size:13px;color:var(--side-dim)">(this appliance)</span></h2>
       <div class="chips"><span class="chip on">IPsec</span><span class="chip on">MACsec</span><span class="chip on">SSH</span></div>
       <div class="kv">SAE <b id="mSae">-</b></div>
+      <div class="kv" id="mAddrRow" hidden>Encryptor link <b id="mAddr">-</b></div>
       <div class="kv">KME <b id="mKme">-</b></div>
       <div class="kv">Peer SAE <b id="mPeerSae">-</b></div>
       <div class="kv" id="mLanRow" hidden>Laptop <b id="mLan">-</b></div>
@@ -96,6 +97,7 @@
     <div class="card off" id="slaveCard">
       <h2>Encryptor (Slave) <span style="font-size:13px;color:var(--side-dim)" id="slaveHint">(not linked)</span></h2>
       <div class="chips"><span class="chip">IPsec</span><span class="chip">MACsec</span><span class="chip">SSH</span></div>
+      <div class="kv" id="sAddrRow">Encryptor link <b id="sAddr">-</b></div>
       <div class="kv" id="sLanRow" hidden>Laptop <b id="sLan">-</b></div>
       <div class="kv" id="sInfo" hidden>SAE <b id="sSae">-</b> &middot; KME <b id="sKme">-</b></div>
     </div>
@@ -143,8 +145,8 @@ function draw() {
   const g = el('g', {transform: S.laptop ? 'translate(0,100)' : 'translate(0,0)'}); root.append(g);
   const linked = S.link.linked, ip = S.ipsec;
   const cls = !linked ? 'off' : ip.state === 'established' ? '' : 'down';
-  node(g, 40, 95, 'Encryptor (Master)', S.sae_id, ['IPsec', 'MACsec', 'SSH'], false);
-  node(g, 630, 95, 'Encryptor (Slave)', linked && S.peer && S.peer.sae_id ? S.peer.sae_id : (linked ? S.peer_sae : 'not linked'), ['IPsec', 'MACsec', 'SSH'], !linked);
+  node(g, 40, 95, 'Encryptor (Master)', S.sae_id + (S.addr ? '  \u00b7  ' + S.addr : ''), ['IPsec', 'MACsec', 'SSH'], false);
+  node(g, 630, 95, 'Encryptor (Slave)', linked && S.peer && S.peer.sae_id ? S.peer.sae_id + '  \u00b7  ' + S.peer_addr : (linked ? S.peer_sae + '  \u00b7  ' + S.peer_addr : 'not linked'), ['IPsec', 'MACsec', 'SSH'], !linked);
   g.append(el('line', {x1: 270, y1: 160, x2: 630, y2: 160, class: 'link ' + cls}));
   const k = el('g', {class: 'linkbox'}); k.append(el('rect', {x: 330, y: 100, width: 240, height: 130, rx: 3}));
   const lines = !linked ? ['IPsec link', 'waiting for the slave', S.peer_addr || ''] :
@@ -211,6 +213,7 @@ function side() {
   $('#crumbSae').textContent = S.sae_id; $('#mSae').textContent = S.sae_id; $('#mKme').textContent = S.kme + (S.kme_ms != null ? ' \u00b7 ' + S.kme_ms + ' ms' : ' \u00b7 unreachable'); $('#mPeerSae').textContent = S.peer_sae;
   $('#mLanRow').hidden = $('#sLanRow').hidden = !S.laptop;
   if (S.laptop) { $('#mLan').textContent = S.laptop.addr + ' in ' + (S.laptop.local_ts || '-'); $('#sLan').textContent = S.laptop.peer + ' in ' + (S.laptop.remote_ts || '-'); }
+  $('#mAddrRow').hidden = !S.addr; $('#mAddr').textContent = S.addr || '-'; $('#sAddr').textContent = S.peer_addr || '-';
   $('#peer').value = S.peer_addr; if (document.activeElement !== $('#fabric')) $('#fabric').value = S.link.fabric || '';
   const l = S.link.linked, sc = $('#slaveCard');
   sc.classList.toggle('off', !l); $('#slaveHint').textContent = l ? '(linked' + (S.link.fabric ? ' · ' + S.link.fabric : '') + ')' : '(not linked)';

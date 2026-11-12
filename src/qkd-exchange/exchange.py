@@ -122,6 +122,18 @@ class Exchange:
         self.state = {n: {"seq": 0, "last_ok": None, "last_error": None} for n in self.cons}
         self.lock = threading.Lock()
         self.wake = {n: threading.Event() for n in self.cons}
+        self.kme_ms = None                       # TCP connect time to this site's KME, refreshed in the background
+
+    def start_probes(self):
+        """Measure the KME in the background so the status calls never wait for it."""
+        u = urllib.parse.urlparse(self.cfg["kme"]["url"])
+        host, port = u.hostname, u.port or (443 if u.scheme == "https" else 80)
+
+        def loop():
+            while True:
+                self.kme_ms = tcp_latency_ms(host, port)
+                time.sleep(5)
+        threading.Thread(target=loop, daemon=True).start()
 
     # master side
     def rotate(self, c):
@@ -185,7 +197,7 @@ class Exchange:
         log.info("%s: applied seq=%d key_id=%s", c["name"], b["seq"], key_id)
 
     def status(self):
-        return {"sae_id": self.cfg["sae_id"], "kme": self.cfg["kme"]["url"], "consumers": self.state}
+        return {"sae_id": self.cfg["sae_id"], "kme": self.cfg["kme"]["url"], "kme_ms": self.kme_ms, "consumers": self.state}
 
 
 def make_server(addr, port, handler, what):
@@ -337,9 +349,13 @@ class Console:
         atomic_write(self.persist, json.dumps(self.state), 0o600)
 
     def latency(self):
-        if time.time() - self._lat[0] > 5:
-            self._lat = (time.time(), tcp_latency_ms(self.peer_host, self.peer_port))
         return self._lat[1]
+
+    def poll_latency(self):
+        """Peer API latency, measured in the background: the status call returns at once even when the peer is down."""
+        while True:
+            self._lat = (time.time(), tcp_latency_ms(self.peer_host, self.peer_port))
+            time.sleep(5)
 
     def status(self):
         ex = self.ex
@@ -348,7 +364,7 @@ class Console:
                "peer_sae": next(iter(ex.cons.values()))["peer_sae"], "consumers": mine,
                "ipsec": parse_ipsec(read_state(self.cfg.get("ipsec_file", "/state/ipsec.txt"))),
                "macsec": parse_macsec(read_state(self.cfg.get("macsec_file", "/state/macsec.txt"))),
-               "latency_ms": self.latency(), "link": dict(self.state), "peer": None}
+               "latency_ms": self.latency(), "kme_ms": ex.kme_ms, "link": dict(self.state), "peer": None}
         if self.state["linked"]:
             try:
                 out["peer"] = ex.peer_get("/v1/status")
@@ -470,13 +486,16 @@ def run(path):
     cfg = json.load(open(path))
     wait_for_files(cfg)
     ex = Exchange(cfg)
+    ex.start_probes()
     threading.Thread(target=serve_health, daemon=True).start()
     threading.Thread(target=serve_peer, args=(ex,), daemon=True).start()
     for c in cfg["consumers"]:
         if c["role"] == "master":
             threading.Thread(target=ex.master_loop, args=(c,), daemon=True).start()
     if cfg.get("console") and any(c["role"] == "master" for c in cfg["consumers"]):
-        threading.Thread(target=serve_console, args=(Console(ex),), daemon=True).start()
+        con = Console(ex)
+        threading.Thread(target=con.poll_latency, daemon=True).start()
+        threading.Thread(target=serve_console, args=(con,), daemon=True).start()
     while True:
         time.sleep(3600)
 

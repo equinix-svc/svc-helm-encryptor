@@ -3,9 +3,9 @@
 # NOT QKD, plain HTTP: restrict TCP 8443 and 8444 to the peer), SAE-A master and SAE-B slave, and a simulated laptop on each side.
 # Placeholders: Equinix inline syntax, case-sensitive.   Equinix: hostname userName publicKey adminPwd ipAddressWithCidr gateway
 # Required: QKD_ROLE (master|slave) IKE_PSK PEER_ADDR REGISTRY_USER REGISTRY_TOKEN; master also FQDN ADMIN_EMAIL (ADMIN_PASSWORD generated).
-# Optional: LOCAL_ADDR (ens5, encryptor link) CLUSTER_ADDR (ens4, k3s) KME_ADDR KME_PEER_ADDR (ens6, KME channel) LOCAL_TS REMOTE_TS
+# Optional: LOCAL_ADDR (ens5, encryptor link) KME_ADDR KME_PEER_ADDR (ens6, KME channel) LOCAL_TS REMOTE_TS
 #   (default 10.1.0.0/24 behind the master, 10.2.0.0/24 behind the slave) MACSEC_IFACE (e.g. ens7) MACSEC_ADDR K3S_ROLE K3S_SERVER_URL
-#   K3S_TOKEN K3S_TLS_SAN. Meaning and examples: README. The encryptor is installed on a single node or the first server only.
+#   K3S_TOKEN K3S_TLS_SAN. ens4 carries the k3s private path (10.250.<3rd>.<4th>/16 from the public IP). Meaning and examples: README. The encryptor is installed on a single node or the first server only.
 # Equinix injects a STATIC address (no DHCP), so this file configures the network itself.
 
 hostname: [(${hostname})]
@@ -63,7 +63,8 @@ write_files:
       LOCAL_ADDR='[(${LOCAL_ADDR})]'
       KME_ADDR='[(${KME_ADDR})]'
       KME_PEER_ADDR='[(${KME_PEER_ADDR})]'
-      CLUSTER_ADDR='[(${CLUSTER_ADDR})]'
+      K3S_PRIVATE_IFACE=''
+      K3S_PRIVATE_IP_CIDR=''
       REGISTRY_USER='[(${REGISTRY_USER})]'
       REGISTRY_TOKEN='[(${REGISTRY_TOKEN})]'
       FQDN='[(${FQDN})]'
@@ -108,7 +109,7 @@ write_files:
       host10() { printf '%s' "${1%/*}" | awk -F. '{print $1"."$2"."$3".10"}'; }
       LAPTOP_IP="$(host10 "$LOCAL_TS")"; PEER_LAPTOP_IP="$(host10 "$REMOTE_TS")"; LAPTOP_MASK="${LOCAL_TS#*/}"
       # --- network files (kept across reboots): ens4 cluster, ens5 encryptor link, ens6 KME channel, laptop0 (BASIC); scripts/network.sh
-      LOCAL_ADDR="${LOCAL_ADDR:-}" KME_ADDR="${KME_ADDR:-}" CLUSTER_ADDR="${CLUSTER_ADDR:-}" LAPTOP_IP="${LAPTOP_IP:-}" LAPTOP_MASK="${LAPTOP_MASK:-}" \
+      LOCAL_ADDR="${LOCAL_ADDR:-}" KME_ADDR="${KME_ADDR:-}" LAPTOP_IP="${LAPTOP_IP:-}" LAPTOP_MASK="${LAPTOP_MASK:-}" \
         /usr/local/bin/day0-network.sh || echo "WARNING: network files not applied: set the NIC addresses by hand"
       if [ -n "${LOCAL_ADDR:-}" ] && ! ip -4 -o addr show | grep -qw "$LOCAL_ADDR"; then echo "WARNING: LOCAL_ADDR $LOCAL_ADDR is not set on any interface; the peer API and IPsec wait until it exists"; fi
 
@@ -279,14 +280,26 @@ write_files:
       ROLE="$K3S_ROLE"; [ -n "$ROLE" ] || ROLE=single
       NODE_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')"
 
+      # Private path between nodes (default on): static address on ens4 in 10.250.0.0/16, built from the public IP
+      # (10.250.<3rd>.<4th>/16) so nodes never collide. k3s uses it as node-ip: cluster traffic stays on it. Same as svc-helm-daihub.
+      PRIV_IF="${K3S_PRIVATE_IFACE:-ens4}"; PRIV_IP=""
+      PRIV_CIDR="$K3S_PRIVATE_IP_CIDR"
+      if [ -z "$PRIV_CIDR" ] && [ -n "$NODE_IP" ]; then PRIV_CIDR="10.250.$(echo "$NODE_IP" | cut -d. -f3).$(echo "$NODE_IP" | cut -d. -f4)/16"; fi
+      [ "$PRIV_CIDR" != none ] || PRIV_CIDR=""
+      if [ -n "$PRIV_CIDR" ] && ! ip link show "$PRIV_IF" >/dev/null 2>&1; then echo "private path skipped: no interface $PRIV_IF"; PRIV_CIDR=""; fi
+      if [ -n "$PRIV_CIDR" ]; then
+        PRIV_IP="${PRIV_CIDR%/*}"
+        printf '[Match]\nName=%s\n\n[Network]\nAddress=%s\nConfigureWithoutCarrier=yes\nLinkLocalAddressing=no\nIPv6AcceptRA=no\n' \
+          "$PRIV_IF" "$PRIV_CIDR" > /etc/systemd/network/10-private.network
+        networkctl reload; networkctl reconfigure "$PRIV_IF" || true
+        echo "private path: $PRIV_CIDR on $PRIV_IF"
+      fi
+
       mkdir -p /etc/rancher/k3s
       CFG=/etc/rancher/k3s/config.yaml
       : > "$CFG"; chmod 0600 "$CFG"
+      [ -n "${PRIV_IP:-$NODE_IP}" ] && echo "node-ip: ${PRIV_IP:-$NODE_IP}" >> "$CFG"
       curl -fsSL --retry 3 -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/scripts/network.sh" -o /usr/local/bin/day0-network.sh && chmod 0755 /usr/local/bin/day0-network.sh || echo "network script not downloaded"
-      if [ -n "$CLUSTER_ADDR" ]; then          # k3s cluster traffic on ens4: the address must exist before k3s starts
-        CLUSTER_ADDR="$CLUSTER_ADDR" /usr/local/bin/day0-network.sh || { echo "cluster NIC not configured"; exit 1; }
-        printf 'node-ip: %s\nnode-external-ip: %s\nflannel-iface: ens4\n' "$CLUSTER_ADDR" "$NODE_IP" >> "$CFG"
-      elif [ -n "$NODE_IP" ]; then echo "node-ip: $NODE_IP" >> "$CFG"; fi
       [ -n "$K3S_TOKEN" ] && echo "token: \"$K3S_TOKEN\"" >> "$CFG"
 
       case "$ROLE" in
@@ -343,7 +356,7 @@ write_files:
       # Encryptor stack: single node or first server only
       if [ "$UNIT" = k3s ] && [ -z "$K3S_SERVER_URL" ]; then
         echo "installing the encryptor stack"
-        QKD_ROLE="$QKD_ROLE" PEER_ADDR="$PEER_ADDR" IKE_PSK="$IKE_PSK" LOCAL_ADDR="$LOCAL_ADDR" KME_ADDR="$KME_ADDR" KME_PEER_ADDR="$KME_PEER_ADDR" CLUSTER_ADDR="$CLUSTER_ADDR" REGISTRY_USER="$REGISTRY_USER" REGISTRY_TOKEN="$REGISTRY_TOKEN" \
+        QKD_ROLE="$QKD_ROLE" PEER_ADDR="$PEER_ADDR" IKE_PSK="$IKE_PSK" LOCAL_ADDR="$LOCAL_ADDR" KME_ADDR="$KME_ADDR" KME_PEER_ADDR="$KME_PEER_ADDR" REGISTRY_USER="$REGISTRY_USER" REGISTRY_TOKEN="$REGISTRY_TOKEN" \
         FQDN="$FQDN" ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" \
         LOCAL_TS="$LOCAL_TS" REMOTE_TS="$REMOTE_TS" MACSEC_IFACE="$MACSEC_IFACE" MACSEC_ADDR="$MACSEC_ADDR" \
         /usr/local/bin/day0-encryptor.sh \

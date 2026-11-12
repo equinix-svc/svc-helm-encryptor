@@ -1,19 +1,17 @@
 #!/usr/bin/env bash
-# network.sh - addresses of the appliance NICs, written as files that survive a reboot. Run by Day 0 (before k3s starts when only
-# CLUSTER_ADDR is set, then again with everything else). Environment, all optional, each address gets a /24:
-#   CLUSTER_ADDR  ens4  k3s cluster traffic (API, etcd, kubelet, VXLAN)        e.g. 172.16.2.11
+# network.sh - addresses of the appliance NICs, written as files that survive a reboot. Run by Day 0. ens4 (the k3s private path) is
+# configured by the Day 0 bootstrap itself, before k3s starts. Environment, all optional, each address gets a /24:
 #   LOCAL_ADDR    ens5  encryptor to encryptor: IKE, peer API                  e.g. 172.16.0.11
 #   KME_ADDR      ens6  KME to KME channel (the lab simulators' QKD link)      e.g. 172.16.1.11
 #   LAPTOP_IP / LAPTOP_MASK  BASIC lab: a simulated laptop on a dummy interface laptop0
 # Portal interface N is the Linux NIC ens(N+2): interface2 = ens4 ... interface7 = ens9. ens3 (interface1) is the management NIC and
-# is not touched. NIC names can be overridden with NIC_CLUSTER, NIC_LINK, NIC_KME. The NICs are addressed with a netplan file; the
+# is not touched. NIC names can be overridden with NIC_LINK, NIC_KME. The NICs are addressed with a netplan file; the
 # dummy interface uses systemd-networkd files because this netplan has no dummy device.
 set -u
 NP="${NP:-/etc/netplan/60-qkd-encryptor.yaml}"
 NDIR="${NDIR:-/etc/systemd/network}"
 y=""
 add() { y="$y    $1:\n      addresses: [$2/24]\n"; }
-[ -n "${CLUSTER_ADDR:-}" ] && add "${NIC_CLUSTER:-ens4}" "$CLUSTER_ADDR"
 [ -n "${LOCAL_ADDR:-}" ]   && add "${NIC_LINK:-ens5}" "$LOCAL_ADDR"
 [ -n "${KME_ADDR:-}" ]     && add "${NIC_KME:-ens6}" "$KME_ADDR"
 if [ -n "$y" ]; then
@@ -28,5 +26,5 @@ fi
 [ -n "$y" ] || [ -n "${LAPTOP_IP:-}" ] || exit 0
 [ -n "${NO_APPLY:-}" ] && exit 0
 netplan generate 2>/dev/null; networkctl reload || { echo "network files written but not applied"; exit 1; }
-networkctl reconfigure "${NIC_CLUSTER:-ens4}" "${NIC_LINK:-ens5}" "${NIC_KME:-ens6}" laptop0 2>/dev/null || true
+networkctl reconfigure "${NIC_LINK:-ens5}" "${NIC_KME:-ens6}" laptop0 2>/dev/null || true
 sleep 3

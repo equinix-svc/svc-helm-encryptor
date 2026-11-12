@@ -118,12 +118,15 @@ write_files:
       LINK_IFACE="${LINK_IFACE:-ens4}"
       NP=/etc/netplan/60-qkd-encryptor.yaml
       if [ -n "${LOCAL_ADDR:-}" ] || [ -n "${LAPTOP_IP:-}" ]; then
-        { echo "network:"; echo "  version: 2"
-          if [ -n "${LOCAL_ADDR:-}" ]; then printf '  ethernets:\n    %s:\n      addresses: [%s/24]\n' "$LINK_IFACE" "$LOCAL_ADDR"; fi
-          if [ -n "${LAPTOP_IP:-}" ]; then printf '  dummy-devices:\n    laptop0:\n      addresses: [%s/%s]\n' "$LAPTOP_IP" "$LAPTOP_MASK"; fi
-        } > "$NP"; chmod 0600 "$NP"
-        if netplan generate && networkctl reload; then networkctl reconfigure "$LINK_IFACE" laptop0 2>/dev/null || true; sleep 3
-        else echo "WARNING: netplan failed: set the address on $LINK_IFACE by hand"; fi
+        if [ -n "${LOCAL_ADDR:-}" ]; then
+          printf 'network:\n  version: 2\n  ethernets:\n    %s:\n      addresses: [%s/24]\n' "$LINK_IFACE" "$LOCAL_ADDR" > "$NP"; chmod 0600 "$NP"
+        fi
+        if [ -n "${LAPTOP_IP:-}" ]; then      # netplan has no dummy device here: systemd-networkd files, same mechanism underneath
+          printf '[NetDev]\nName=laptop0\nKind=dummy\n' > /etc/systemd/network/40-laptop0.netdev
+          printf '[Match]\nName=laptop0\n\n[Network]\nAddress=%s/%s\n' "$LAPTOP_IP" "$LAPTOP_MASK" > /etc/systemd/network/40-laptop0.network
+        fi
+        if netplan generate 2>/dev/null; networkctl reload; then networkctl reconfigure "$LINK_IFACE" laptop0 2>/dev/null || true; sleep 3
+        else echo "WARNING: network files not applied: set the address on $LINK_IFACE by hand"; fi
       fi
       if [ -n "${LOCAL_ADDR:-}" ] && ! ip -4 -o addr show | grep -qw "$LOCAL_ADDR"; then echo "WARNING: LOCAL_ADDR $LOCAL_ADDR is not set on any interface; the peer API and IPsec wait until it exists"; fi
 

@@ -80,6 +80,31 @@ BASIC uses plain HTTP for the KME and the peer API. ADVANCED does too when `KME_
 | BASIC | allow 22, UDP 500/4500, ESP, and TCP 8443 and 8444 from the peer only; the master also needs 80 and 443 from anywhere |
 | ADVANCED | allow 22, UDP 500/4500, ESP and TCP 8444 from the peer; the master also needs 80 and 443 from anywhere |
 
+### Network between the appliances
+
+A Network Edge device created with 5 interfaces has one Linux NIC per portal interface, in order from `ens3`. The Day 0 files configure none of the NICs except `ens3`.
+
+| Portal interface | NIC | Use |
+|---|---|---|
+| interface1 | `ens3` | management: SSH, Internet Access, the public console |
+| interface2 | `ens4` | link to the other appliance: `LOCAL_ADDR` and `PEER_ADDR` (IKE, peer API, KME simulator) |
+| interface3 | `ens5` | `MACSEC_IFACE`: a NIC dedicated to MACsec |
+| interface4, interface5 | `ens6`, `ens7` | spare |
+
+The portal lists each interface's MAC address (device details) and `ip -br link` shows it on the node, so the mapping can be checked.
+
+1. In the portal, create a Layer 2 link between `interface2` of both devices (a device link in the same metro, or a Fabric connection).
+2. Put `LOCAL_ADDR` on `ens4` of each node, for example `172.16.0.11/24` on the master and `172.16.0.12/24` on the slave:
+
+```
+sudo ip link set ens4 up && sudo ip addr add 172.16.0.11/24 dev ens4
+```
+
+   This is lost at reboot. A file such as `/etc/netplan/60-peer.yaml` containing `network: {version: 2, ethernets: {ens4: {addresses: [172.16.0.11/24]}}}`, followed by `sudo netplan apply`, keeps it.
+3. Check with `ping <PEER_ADDR>`, then `check-install.sh`. The console shows the IPsec link once the peer answers.
+
+Until `LOCAL_ADDR` exists on an interface, the peer API and the simulator retry every 15 seconds, the IPsec tunnel stays `CONNECTING`, and the Day 0 log carries a warning. With both addresses private, the key exchange does not use the public interface.
+
 ## 4. Load KME certificates after boot
 
 The KME client certificates are **not** Day 0 parameters, so the private key never goes through the portal. They are loaded into Secret `kme-tls` once the node is up. Used with ADVANCED when `KME_URL` is `https://`; the same files also protect the peer API (port 8444).
@@ -140,7 +165,7 @@ The master serves a small web console: the appliance pair as two nodes joined by
 - **PPK ID:** it is fixed, so a brief key-switch window can fail an authentication. That is retried.
 - **SSH:** QKD can't plug into the SSH transport itself. qkd-exchange only rotates key pairs, and you still need to wire them into `sshd` or a CA.
 - **Public name:** Let's Encrypt issued the console certificate on a real node. Traefik requests it about a second after it starts, so its Deployment uses the `Recreate` strategy and its Service publishes not-ready addresses; otherwise the validation reaches the old pod or no pod and fails. `sudo cat /etc/encryptor/dns-wait.state` shows the state, and `check-install.sh` shows the certificate issuer.
-- **Untested:** a real KME (certificate and SAE ID mapping vary by vendor), the images pulled from ghcr.io on a real node, Equinix Network Edge devices, and the Fabric link between them (including whether the virtual switch passes MACsec frames).
+- **Untested:** the netplan file that keeps the `ens4` address across reboots, a real KME (certificate and SAE ID mapping vary by vendor), the images pulled from ghcr.io on a real node, Equinix Network Edge devices, and the Fabric link between them (including whether the virtual switch passes MACsec frames).
 - **IKE authentication:** it uses a shared secret (`IKE_PSK`) for now. Certificates would be better for production.
 - **Day 0 size:** the templates are about 14 KB, under the portal limit of 20,000 characters. No certificate goes through Day 0.
 - **Secrets in Day 0:** the Day 0 files hold no secret. `IKE_PSK` (and `K3S_TOKEN` for an agent, `REGISTRY_TOKEN`) still travel as portal parameters and end up in a Kubernetes Secret on the node, readable by root.

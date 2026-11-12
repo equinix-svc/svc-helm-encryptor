@@ -48,10 +48,10 @@
   .msg { margin:8px 0 0 32px; font-size:12px; color:var(--orange); }
   main { flex:1; position:relative; display:flex; flex-direction:column; min-width:0; overflow-y:auto;
          background:radial-gradient(1200px 600px at 70% 10%, #3b3640 0%, var(--main) 60%); }
-  .floats { position:absolute; top:14px; right:16px; display:flex; flex-direction:column; align-items:flex-end; gap:10px; z-index:2; }
+  .floats { position:absolute; top:12px; right:16px; display:flex; flex-direction:row; align-items:center; gap:10px; z-index:2; }
   .fbtn { background:#fff; color:#1d1d1d; border:0; border-radius:4px; padding:10px 14px; font:500 15px var(--font); cursor:pointer; box-shadow:0 1px 4px rgba(0,0,0,.35); }
   .fbtn:hover:not(:disabled) { background:#f0f0f0; } .fbtn.active { background:var(--red); color:#fff; } .fbtn:disabled { opacity:.55; cursor:default; }
-  svg#diagram { width:100%; height:440px; flex:none; }
+  svg#diagram { width:100%; height:520px; flex:none; margin-top:56px; }
   svg text { font-family:var(--font); }
   .node rect { fill:#3a3d42; stroke:#8a8d93; stroke-width:1.5; } .node.off rect { fill:#34353a; stroke:#55575c; stroke-dasharray:6 5; }
   .node text.t { fill:#fff; font-size:17px; font-weight:500; } .node text.s { fill:#a4a6ab; font-size:12px; }
@@ -61,6 +61,8 @@
   .kme rect { fill:#2f3136; stroke:#8a8d93; stroke-width:1.5; } .kme.off rect { fill:#34353a; stroke:#55575c; stroke-dasharray:6 5; }
   .kme text.t { fill:#fff; font-size:15px; font-weight:500; } .kme text.s { fill:#a4a6ab; font-size:12px; } .kme.off text.t, .kme.off text.s { fill:#6f7176; }
   .klink { stroke:var(--cyan); stroke-width:2; fill:none; } .klink.down { stroke:var(--red); stroke-dasharray:8 6; } .klink.off { stroke:#55575c; stroke-dasharray:3 7; }
+  .laptop rect { fill:#2f3136; stroke:#b9bcc2; stroke-width:1.5; } .laptop.off rect { stroke:#55575c; stroke-dasharray:6 5; } .laptop text.t { fill:#fff; font-size:15px; font-weight:500; } .laptop text.s { fill:#a4a6ab; font-size:12px; } .laptop.off text.t, .laptop.off text.s { fill:#6f7176; }
+  .lan { stroke:#8a8d93; stroke-width:2; fill:none; } .lan.off { stroke:#55575c; stroke-dasharray:3 7; }
   .qlink { stroke:#8a8d93; stroke-width:2; stroke-dasharray:2 6; fill:none; } svg text.lbl { fill:#c9c6cf; font-size:12px; }
   .linkbox rect { fill:#1f2023; stroke:#55575c; } .linkbox text { fill:#e8e8e8; font-size:12px; } .linkbox text.h { fill:var(--cyan); font-weight:600; }
   .table { margin:6px 24px 24px; background:var(--row); color:var(--row-text); max-width:900px; }
@@ -88,10 +90,12 @@
       <div class="kv">SAE <b id="mSae">-</b></div>
       <div class="kv">KME <b id="mKme">-</b></div>
       <div class="kv">Peer SAE <b id="mPeerSae">-</b></div>
+      <div class="kv" id="mLanRow" hidden>Laptop <b id="mLan">-</b></div>
     </div>
     <div class="card off" id="slaveCard">
       <h2>Slave <span style="font-size:13px;color:var(--side-dim)" id="slaveHint">(not linked)</span></h2>
       <div class="chips"><span class="chip">IPsec</span><span class="chip">MACsec</span><span class="chip">SSH</span></div>
+      <div class="kv" id="sLanRow" hidden>Laptop <b id="sLan">-</b></div>
       <div class="kv" id="sInfo" hidden>SAE <b id="sSae">-</b> &middot; KME <b id="sKme">-</b></div>
     </div>
     <div class="card">
@@ -112,7 +116,7 @@
       <button class="fbtn" id="rotate" type="button">Rotate keys now</button>
       <button class="fbtn" id="refresh" type="button">Refresh</button>
     </div>
-    <svg id="diagram" viewBox="0 0 900 440" preserveAspectRatio="xMidYMid meet"></svg>
+    <svg id="diagram" viewBox="0 0 900 520" preserveAspectRatio="xMidYMid meet"></svg>
     <h3>Key rotation</h3>
     <div class="table" id="table"></div>
   </main>
@@ -134,19 +138,39 @@ function node(g, x, y, title, sub, tags, off) {
   g.append(n);
 }
 function draw() {
-  const g = $('#diagram'); g.innerHTML = '';
+  const root = $('#diagram'); root.innerHTML = '';
+  const g = el('g', {transform: S.laptop ? 'translate(0,100)' : 'translate(0,0)'}); root.append(g);
   const linked = S.link.linked, ip = S.ipsec;
   const cls = !linked ? 'off' : ip.state === 'established' ? '' : 'down';
   node(g, 40, 95, 'Master', S.sae_id, ['IPsec', 'MACsec', 'SSH'], false);
   node(g, 630, 95, 'Slave', linked && S.peer && S.peer.sae_id ? S.peer.sae_id : (linked ? S.peer_sae : 'not linked'), ['IPsec', 'MACsec', 'SSH'], !linked);
   g.append(el('line', {x1: 270, y1: 160, x2: 630, y2: 160, class: 'link ' + cls}));
-  const k = el('g', {class: 'linkbox'}); k.append(el('rect', {x: 330, y: 100, width: 240, height: 120, rx: 3}));
+  const k = el('g', {class: 'linkbox'}); k.append(el('rect', {x: 330, y: 100, width: 240, height: 130, rx: 3}));
   const lines = !linked ? ['IPsec link', 'waiting for the slave', S.peer_addr || ''] :
     ['IPsec  ' + ip.state, ip.state === 'established' ? 'up for ' + dur(ip.age_s) + ' · ' + ip.children + ' child SA' : 'no tunnel yet',
+     ip.state === 'established' && ip.pkts_out != null ? 'ESP  ' + ip.pkts_out + ' packets out · ' + ip.pkts_in + ' in' : 'ESP  no traffic yet',
      'latency  ' + (S.latency_ms == null ? 'unreachable' : S.latency_ms + ' ms'), 'last key  ' + age(Math.max(...S.consumers.map(c => c.last_ok || 0)))];
-  lines.forEach((t, i) => k.append(el('text', {x: 345, y: 124 + i * 22, class: i ? '' : 'h'}, t)));
+  lines.forEach((t, i) => k.append(el('text', {x: 345, y: 124 + i * 21, class: i ? '' : 'h'}, t)));
   g.append(k);
   kmes(g, linked);
+  if (S.laptop) laptops(root, linked);
+}
+function laptopbox(g, x, y, title, sub, off) {
+  const n = el('g', {class: 'laptop' + (off ? ' off' : '')});
+  n.append(el('rect', {x, y, width: 230, height: 62, rx: 3}), el('text', {x: x + 16, y: y + 26, class: 't'}, title), el('text', {x: x + 16, y: y + 47, class: 's'}, sub));
+  g.append(n);
+}
+function laptops(g, linked) {
+  const L = S.laptop, pl = linked && S.peer && !S.peer.error ? S.peer.laptop : null;
+  laptopbox(g, 40, 6, 'Laptop (simulated)', L.addr + '  \u00b7  LOCAL_TS ' + (L.local_ts || ''), false);
+  laptopbox(g, 630, 6, 'Laptop (simulated)', L.peer + '  \u00b7  REMOTE_TS ' + (L.remote_ts || ''), !linked);
+  g.append(el('line', {x1: 155, y1: 68, x2: 155, y2: 195, class: 'lan'}), el('line', {x1: 745, y1: 68, x2: 745, y2: 195, class: !linked ? 'lan off' : 'lan'}));
+  const dir = (y, from, to, st, known) => {
+    g.append(el('line', {x1: 270, y1: y, x2: 630, y2: y, class: 'klink ' + (!known ? 'off' : st && st.ok ? '' : 'down')}));
+    g.append(el('text', {x: 450, y: y - 6, class: 'lbl', 'text-anchor': 'middle'}, from + ' \u2192 ' + to + '  \u00b7  ' + (!known ? 'not linked' : st && st.ok ? st.ms + ' ms, through the tunnel' : 'no answer')));
+  };
+  dir(30, L.addr, L.peer, L, true);
+  dir(56, L.peer, L.addr, pl, !!pl);
 }
 const hp = u => { try { const x = new URL(u); return x.host; } catch (e) { return u || '-'; } };
 function kmebox(g, x, y, w, title, sub, off) {
@@ -187,6 +211,8 @@ function table() {
 }
 function side() {
   $('#crumbSae').textContent = S.sae_id; $('#mSae').textContent = S.sae_id; $('#mKme').textContent = S.kme + (S.kme_ms != null ? ' \u00b7 ' + S.kme_ms + ' ms' : ' \u00b7 unreachable'); $('#mPeerSae').textContent = S.peer_sae;
+  $('#mLanRow').hidden = $('#sLanRow').hidden = !S.laptop;
+  if (S.laptop) { $('#mLan').textContent = S.laptop.addr + ' in ' + (S.laptop.local_ts || '-'); $('#sLan').textContent = S.laptop.peer + ' in ' + (S.laptop.remote_ts || '-'); }
   $('#peer').value = S.peer_addr; if (document.activeElement !== $('#fabric')) $('#fabric').value = S.link.fabric || '';
   const l = S.link.linked, sc = $('#slaveCard');
   sc.classList.toggle('off', !l); $('#slaveHint').textContent = l ? '(linked' + (S.link.fabric ? ' · ' + S.link.fabric : '') + ')' : '(not linked)';

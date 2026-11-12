@@ -13,6 +13,7 @@
 #     IKE_PSK       IKEv2 authentication secret, identical on both ends (required)
 #     LOCAL_TS REMOTE_TS   protected subnets, e.g. 10.1.0.0/24 and 10.2.0.0/24
 #     LOCAL_ADDR    this appliance's own IP towards the peer (IKE source, peer API bind); default: address of the default route  (optional)
+#     LINK_IFACE    NIC that carries LOCAL_ADDR (written to a netplan file); default ens4 = portal interface2  (optional)
 #     MACSEC_IFACE  host NIC to protect with MACsec, e.g. ens4 (empty = no MACsec)
 #     MACSEC_ADDR   optional CIDR to put on the macsec interface, e.g. 10.99.0.1/24
 #     REGISTRY_USER REGISTRY_TOKEN  GitHub login and read:packages token to pull the private images from ghcr.io  (required)
@@ -80,6 +81,7 @@ write_files:
       MACSEC_IFACE='[(${MACSEC_IFACE})]'
       MACSEC_ADDR='[(${MACSEC_ADDR})]'
       LOCAL_ADDR='[(${LOCAL_ADDR})]'
+      LINK_IFACE='[(${LINK_IFACE})]'
       REGISTRY_USER='[(${REGISTRY_USER})]'
       REGISTRY_TOKEN='[(${REGISTRY_TOKEN})]'
       FQDN='[(${FQDN})]'
@@ -112,6 +114,17 @@ write_files:
       # (https://FQDN) reaches it and nothing is open on the public address. LOCAL_ADDR is for the peer side and must be on an interface.
       PODCIDR="$($K get node -o jsonpath='{.items[0].spec.podCIDR}' 2>/dev/null || true)"
       CONSOLE_IP="$(printf '%s' "${PODCIDR:-10.42.0.0/24}" | cut -d/ -f1 | awk -F. '{print $1"."$2"."$3"."$4+1}')"
+      # --- network files, kept across reboots: the peer link address on its NIC (portal interface2 = ens4 unless LINK_IFACE is set)
+      LINK_IFACE="${LINK_IFACE:-ens4}"
+      NP=/etc/netplan/60-qkd-encryptor.yaml
+      if [ -n "${LOCAL_ADDR:-}" ] || [ -n "${LAPTOP_IP:-}" ]; then
+        { echo "network:"; echo "  version: 2"
+          if [ -n "${LOCAL_ADDR:-}" ]; then printf '  ethernets:\n    %s:\n      addresses: [%s/24]\n' "$LINK_IFACE" "$LOCAL_ADDR"; fi
+          if [ -n "${LAPTOP_IP:-}" ]; then printf '  dummy-devices:\n    laptop0:\n      addresses: [%s/%s]\n' "$LAPTOP_IP" "$LAPTOP_MASK"; fi
+        } > "$NP"; chmod 0600 "$NP"
+        if netplan generate && networkctl reload; then networkctl reconfigure "$LINK_IFACE" laptop0 2>/dev/null || true; sleep 3
+        else echo "WARNING: netplan failed: set the address on $LINK_IFACE by hand"; fi
+      fi
       if [ -n "${LOCAL_ADDR:-}" ] && ! ip -4 -o addr show | grep -qw "$LOCAL_ADDR"; then echo "WARNING: LOCAL_ADDR $LOCAL_ADDR is not set on any interface; the peer API and IPsec wait until it exists"; fi
 
       W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
@@ -343,7 +356,7 @@ write_files:
       if [ "$UNIT" = k3s ] && [ -z "$K3S_SERVER_URL" ]; then
         echo "installing the encryptor stack"
         SAE_ID="$SAE_ID" PEER_SAE_ID="$PEER_SAE_ID" QKD_ROLE="$QKD_ROLE" KME_URL="$KME_URL" PEER_ADDR="$PEER_ADDR" \
-        IKE_PSK="$IKE_PSK" LOCAL_ADDR="$LOCAL_ADDR" REGISTRY_USER="$REGISTRY_USER" REGISTRY_TOKEN="$REGISTRY_TOKEN" \
+        IKE_PSK="$IKE_PSK" LOCAL_ADDR="$LOCAL_ADDR" LINK_IFACE="$LINK_IFACE" REGISTRY_USER="$REGISTRY_USER" REGISTRY_TOKEN="$REGISTRY_TOKEN" \
         FQDN="$FQDN" ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" \
         LOCAL_TS="$LOCAL_TS" REMOTE_TS="$REMOTE_TS" MACSEC_IFACE="$MACSEC_IFACE" MACSEC_ADDR="$MACSEC_ADDR" \
         /usr/local/bin/day0-encryptor.sh \

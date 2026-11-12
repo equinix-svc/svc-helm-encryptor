@@ -63,8 +63,9 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 | `FQDN` | yes | yes | - | `fred-enc-par01.example.net` | Master only (ignored on a slave). Public name of the console, served at `https://<FQDN>` with a Let's Encrypt certificate. The master's public IP is only known after creation, so create the DNS record afterwards: the node waits (checks every 30 seconds) until `<FQDN>` resolves to it, then enables the certificate, so the first Let's Encrypt attempt succeeds. The login banner shows the IP to use and what the name resolves to now (`not found` or `WRONG` when it points elsewhere, for example after a rebuild with a new IP). Keep port 80 reachable from the internet. |
 | `ADMIN_EMAIL` | yes | yes | - | `xxxx@eu.equinix.com` | Master only. Login name of the console, and contact address for the Let's Encrypt certificate: it must be a real address. |
 | `LOCAL_ADDR` | no | no | address of the default route | `172.16.0.11` | This appliance's own IP towards the peer. It is the IKE source address and the only address the peer API (and, in BASIC, the KME simulator) listens on. Leave it empty and they listen on every address of the node, so restrict TCP 8443 and 8444 to the peer in the ACL. Set it when the peer is reached over a second interface or subnet. |
-| `LOCAL_TS` | no | no | this appliance's address (`LOCAL_ADDR`) | `10.1.0.0/24` | Local protected subnet. The default protects only the traffic between the two appliances. `0.0.0.0/0` would send all the node's traffic, SSH included, into the tunnel and cut the management access. |
-| `REMOTE_TS` | no | no | `PEER_ADDR` | `10.2.0.0/24` | Remote protected subnet. Same warning: never `0.0.0.0/0` on a node you manage over its public address. |
+| `LINK_IFACE` | no | no | `ens4` | `ens4` | NIC that carries `LOCAL_ADDR` (portal interface2). Day 0 writes the address to a netplan file on it. |
+| `LOCAL_TS` | no | no | BASIC: `10.1.0.0/24` on the master, `10.2.0.0/24` on the slave. ADVANCED: `LOCAL_ADDR` | `10.1.0.0/24` | Local protected subnet. In BASIC a simulated laptop lives at `.10` of it (see Console). Never `0.0.0.0/0` on a node you manage over its public address: it would send all the node's traffic, SSH included, into the tunnel. |
+| `REMOTE_TS` | no | no | BASIC: the other side's subnet. ADVANCED: `PEER_ADDR` | `10.2.0.0/24` | Remote protected subnet. Same warning. |
 | `MACSEC_IFACE` | no | no | empty (no MACsec) | `ens4` | Host NIC for MACsec. |
 | `MACSEC_ADDR` | no | no | empty (no address) | `10.99.0.1/24` | CIDR on the macsec interface. |
 | `K3S_ROLE` | no | no | `single` | `single` | `single`: standalone node. `server`: control-plane node. `agent`: k3s worker node that joins an existing cluster; the encryptor is not installed on it. |
@@ -82,7 +83,7 @@ BASIC uses plain HTTP for the KME and the peer API. ADVANCED does too when `KME_
 
 ### Network between the appliances
 
-A Network Edge device created with 5 interfaces has one Linux NIC per portal interface, in order from `ens3`. The Day 0 files configure none of the NICs except `ens3`.
+A Network Edge device created with 5 interfaces has one Linux NIC per portal interface, in order from `ens3`. Day 0 configures `ens3` and, when `LOCAL_ADDR` is set, the link NIC (`LINK_IFACE`, default `ens4`) through a netplan file, so the address survives a reboot.
 
 | Portal interface | NIC | Use |
 |---|---|---|
@@ -94,14 +95,10 @@ A Network Edge device created with 5 interfaces has one Linux NIC per portal int
 The portal lists each interface's MAC address (device details) and `ip -br link` shows it on the node, so the mapping can be checked.
 
 1. In the portal, create a Layer 2 link between `interface2` of both devices (a device link in the same metro, or a Fabric connection).
-2. Put `LOCAL_ADDR` on `ens4` of each node, for example `172.16.0.11/24` on the master and `172.16.0.12/24` on the slave:
-
-```
-sudo ip link set ens4 up && sudo ip addr add 172.16.0.11/24 dev ens4
-```
-
-   This is lost at reboot. A file such as `/etc/netplan/60-peer.yaml` containing `network: {version: 2, ethernets: {ens4: {addresses: [172.16.0.11/24]}}}`, followed by `sudo netplan apply`, keeps it.
+2. Day 0 has already written `/etc/netplan/60-qkd-encryptor.yaml` with `LOCAL_ADDR/24` on `ens4`. The address shows up as soon as the link carries traffic; to set it by hand instead: `sudo ip link set ens4 up && sudo ip addr add 172.16.0.11/24 dev ens4`.
 3. Check with `ping <PEER_ADDR>`, then `check-install.sh`. The console shows the IPsec link once the peer answers.
+
+IPsec only encrypts traffic that matches `LOCAL_TS` and `REMOTE_TS`, and the strongSwan image leaves traffic inside a directly attached subnet (here `172.16.0.0/24`) outside the tunnel. Pinging `PEER_ADDR` therefore proves the link, not the encryption. Protect subnets behind the appliances, as the BASIC simulated laptops do.
 
 Until `LOCAL_ADDR` exists on an interface, the peer API and the simulator retry every 15 seconds, the IPsec tunnel stays `CONNECTING`, and the Day 0 log carries a warning. With both addresses private, the key exchange does not use the public interface.
 
@@ -138,6 +135,7 @@ The master serves a small web console: the appliance pair as two nodes joined by
 | Slave side | greyed until you click "Link slave". The peer address is read-only, taken from the portal parameter `PEER_ADDR`. Linking checks that the peer answers on its API, then shows the slave's SAE and KME |
 | Fabric connection | a text label stored on the node (`/var/lib/encryptor/state/console.json`) and shown on the slave card. The service token and the virtual connection itself are created outside the node: it has no Fabric credentials and never reads the connection's real state |
 | Test the slave side | button under the Fabric label, usable before linking: 5 TCP connects to the slave's peer API port (loss; min, median and max latency), then the peer API call itself (certificates included in ADVANCED). The result is green when both pass |
+| Laptop simulators (BASIC) | Day 0 gives each appliance a dummy interface `laptop0` with a simulated laptop at `.10` of its protected subnet (`10.1.0.10` behind the master, `10.2.0.10` behind the slave), written to the same netplan file. Each appliance runs an echo service on it and, every 5 seconds, sends a few exchanges from its laptop to the other one. Source and destination are inside the protected subnets, so they only get through the tunnel. The console draws both laptops above their appliances with the answer time in each direction, and the link box shows the ESP packet counters |
 | KME links | each appliance is drawn with its QKD appliance (KME) and an ETSI 014 line showing the TCP connect time to it, red and dashed when it does not answer. The slave's figure comes from its own peer API status. When both use the same KME (BASIC: the master's simulator) it is drawn once; with two KMEs the QKD link between them is dotted and not monitored |
 | Link line | IPsec state and uptime, number of child SAs, latency, age of the last key |
 | Latency | median TCP connect time from the master to the peer API port (8444), measured every 5 seconds. It needs no ping tool or root |

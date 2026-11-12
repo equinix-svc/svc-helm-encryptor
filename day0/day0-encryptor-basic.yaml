@@ -11,9 +11,10 @@
 #     IKE_PSK       IKEv2 secret, identical on both ends                 (required)
 #     PEER_ADDR     the other appliance's IP                             (required)
 #     LOCAL_ADDR    this appliance's own IP towards the peer (IKE source, peer API bind); default: address of the default route  (optional)
+#     LINK_IFACE    NIC that carries LOCAL_ADDR (written to a netplan file); default ens4 = portal interface2  (optional)
 #     MACSEC_IFACE  host NIC for MACsec, e.g. ens4 (empty = no MACsec)  (optional)
 #     MACSEC_ADDR   CIDR on the macsec interface, e.g. 10.99.0.1/24      (optional)
-#     LOCAL_TS REMOTE_TS  protected subnets (default: the two appliance addresses only)          (optional)
+#     LOCAL_TS REMOTE_TS  protected subnets (default: 10.1.0.0/24 behind the master, 10.2.0.0/24 behind the slave; a simulated laptop in each)  (optional)
 #     REGISTRY_USER REGISTRY_TOKEN  GitHub login and read:packages token to pull the private images from ghcr.io  (required)
 #     FQDN ADMIN_EMAIL ADMIN_PASSWORD  master only (ignored on a slave): public name of the console, served at https://FQDN with a
 #                   Let's Encrypt certificate (create the DNS record first); ADMIN_EMAIL = login name and certificate contact
@@ -74,6 +75,7 @@ write_files:
       MACSEC_IFACE='[(${MACSEC_IFACE})]'
       MACSEC_ADDR='[(${MACSEC_ADDR})]'
       LOCAL_ADDR='[(${LOCAL_ADDR})]'
+      LINK_IFACE='[(${LINK_IFACE})]'
       REGISTRY_USER='[(${REGISTRY_USER})]'
       REGISTRY_TOKEN='[(${REGISTRY_TOKEN})]'
       FQDN='[(${FQDN})]'
@@ -112,6 +114,22 @@ write_files:
       # (https://FQDN) reaches it and nothing is open on the public address. LOCAL_ADDR is for the peer side and must be on an interface.
       PODCIDR="$($K get node -o jsonpath='{.items[0].spec.podCIDR}' 2>/dev/null || true)"
       CONSOLE_IP="$(printf '%s' "${PODCIDR:-10.42.0.0/24}" | cut -d/ -f1 | awk -F. '{print $1"."$2"."$3"."$4+1}')"
+      # BASIC lab: a simulated laptop on each side, inside the protected subnets (defaults: 10.1.0.0/24 behind the master, 10.2.0.0/24 behind the slave)
+      case "$QKD_ROLE" in master) LTS_DEF=10.1.0.0/24; RTS_DEF=10.2.0.0/24 ;; *) LTS_DEF=10.2.0.0/24; RTS_DEF=10.1.0.0/24 ;; esac
+      LOCAL_TS="${LOCAL_TS:-$LTS_DEF}"; REMOTE_TS="${REMOTE_TS:-$RTS_DEF}"
+      host10() { printf '%s' "${1%/*}" | awk -F. '{print $1"."$2"."$3".10"}'; }
+      LAPTOP_IP="$(host10 "$LOCAL_TS")"; PEER_LAPTOP_IP="$(host10 "$REMOTE_TS")"; LAPTOP_MASK="${LOCAL_TS#*/}"
+      # --- network files, kept across reboots: the peer link address on its NIC (portal interface2 = ens4 unless LINK_IFACE is set) and, in BASIC, the simulated laptop
+      LINK_IFACE="${LINK_IFACE:-ens4}"
+      NP=/etc/netplan/60-qkd-encryptor.yaml
+      if [ -n "${LOCAL_ADDR:-}" ] || [ -n "${LAPTOP_IP:-}" ]; then
+        { echo "network:"; echo "  version: 2"
+          if [ -n "${LOCAL_ADDR:-}" ]; then printf '  ethernets:\n    %s:\n      addresses: [%s/24]\n' "$LINK_IFACE" "$LOCAL_ADDR"; fi
+          if [ -n "${LAPTOP_IP:-}" ]; then printf '  dummy-devices:\n    laptop0:\n      addresses: [%s/%s]\n' "$LAPTOP_IP" "$LAPTOP_MASK"; fi
+        } > "$NP"; chmod 0600 "$NP"
+        if netplan generate && networkctl reload; then networkctl reconfigure "$LINK_IFACE" laptop0 2>/dev/null || true; sleep 3
+        else echo "WARNING: netplan failed: set the address on $LINK_IFACE by hand"; fi
+      fi
       if [ -n "${LOCAL_ADDR:-}" ] && ! ip -4 -o addr show | grep -qw "$LOCAL_ADDR"; then echo "WARNING: LOCAL_ADDR $LOCAL_ADDR is not set on any interface; the peer API and IPsec wait until it exists"; fi
 
       W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
@@ -119,6 +137,7 @@ write_files:
       SCHEME=http; TLSJ='"ca":null'
 
       # console (page + status API) only on the master: listens on the node address, behind Traefik (https://FQDN) and its own login
+      LAPTOP='"laptop":{"addr":"'"$LAPTOP_IP"'","peer":"'"$PEER_LAPTOP_IP"'","port":7,"local_ts":"'"$LOCAL_TS"'","remote_ts":"'"$REMOTE_TS"'"},'
       CONSOLE=""; [ "$QKD_ROLE" = master ] && CONSOLE='"console":{"bind":"'"$CONSOLE_IP"'","port":8080,"hosts":["'"$FQDN"'"],"auth_file":"/etc/qkd/auth/auth"},'
 
       # --- exchange config: three consumers, same role on all of them
@@ -128,6 +147,7 @@ write_files:
        "kme":{"url":"$KME_URL",$TLSJ},
        "peer":{"url":"$SCHEME://$PEER_ADDR:8444","listen":8444$BIND,$TLSJ},
        $CONSOLE
+       $LAPTOP
        "consumers":[
         {"name":"s2s","type":"ipsec","peer_sae":"$PEER_SAE_ID","role":"$QKD_ROLE","interval":$INT,"dir":"/swanctl/conf.d"},
         {"name":"macsec","type":"macsec","peer_sae":"$PEER_SAE_ID","role":"$QKD_ROLE","interval":86400,"dir":"/macsec"},
@@ -161,8 +181,8 @@ write_files:
           }
           children {
             s2s {
-              local_ts = ${LOCAL_TS:-$NODE_IP/32}
-              remote_ts = ${REMOTE_TS:-$PEER_ADDR/32}
+              local_ts = $LOCAL_TS
+              remote_ts = $REMOTE_TS
               esp_proposals = aes256gcm16-x25519
               rekey_time = 30m
               start_action = $START
@@ -338,7 +358,7 @@ write_files:
       # Encryptor stack: single node or first server only
       if [ "$UNIT" = k3s ] && [ -z "$K3S_SERVER_URL" ]; then
         echo "installing the encryptor stack"
-        QKD_ROLE="$QKD_ROLE" PEER_ADDR="$PEER_ADDR" IKE_PSK="$IKE_PSK" LOCAL_ADDR="$LOCAL_ADDR" REGISTRY_USER="$REGISTRY_USER" REGISTRY_TOKEN="$REGISTRY_TOKEN" \
+        QKD_ROLE="$QKD_ROLE" PEER_ADDR="$PEER_ADDR" IKE_PSK="$IKE_PSK" LOCAL_ADDR="$LOCAL_ADDR" LINK_IFACE="$LINK_IFACE" REGISTRY_USER="$REGISTRY_USER" REGISTRY_TOKEN="$REGISTRY_TOKEN" \
         FQDN="$FQDN" ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" \
         LOCAL_TS="$LOCAL_TS" REMOTE_TS="$REMOTE_TS" MACSEC_IFACE="$MACSEC_IFACE" MACSEC_ADDR="$MACSEC_ADDR" \
         /usr/local/bin/day0-encryptor.sh \

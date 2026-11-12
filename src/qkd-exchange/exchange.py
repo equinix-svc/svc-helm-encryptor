@@ -9,7 +9,7 @@ key_ID in-band (here: the peer API); the *slave* SAE calls dec_keys(master_SAE_I
 Rotation is two-phase so both ends switch together: stage (slave fetches and holds) -> commit (both apply).
 Stdlib only, plus `cryptography` for the ssh consumer.
 """
-import argparse, base64, hashlib, hmac, json, logging, os, re, socket, ssl, sys, tempfile, threading, time, uuid
+import argparse, socketserver, base64, hashlib, hmac, json, logging, os, re, socket, ssl, sys, tempfile, threading, time, uuid
 import urllib.error, urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -123,6 +123,8 @@ class Exchange:
         self.lock = threading.Lock()
         self.wake = {n: threading.Event() for n in self.cons}
         self.kme_ms = None                       # TCP connect time to this site's KME, refreshed in the background
+        lp = cfg.get("laptop")                   # lab: a simulated laptop in LOCAL_TS that talks to the one behind the peer
+        self.laptop = dict(lp, ms=None, ok=False, sent=0, answered=0) if lp else None
 
     def start_probes(self):
         """Measure the KME in the background so the status calls never wait for it."""
@@ -134,6 +136,46 @@ class Exchange:
                 self.kme_ms = tcp_latency_ms(host, port)
                 time.sleep(5)
         threading.Thread(target=loop, daemon=True).start()
+        if self.laptop:
+            threading.Thread(target=self.laptop_echo, daemon=True).start()
+            threading.Thread(target=self.laptop_probe, daemon=True).start()
+
+    def laptop_echo(self):
+        """The simulated laptop: an echo service on its address, which lives on a dummy interface of this node."""
+        class H(socketserver.StreamRequestHandler):
+            def handle(self):
+                line = self.rfile.readline(64)
+                if line:
+                    self.wfile.write(line)
+        socketserver.ThreadingTCPServer.allow_reuse_address = True
+        while True:
+            try:
+                srv = socketserver.ThreadingTCPServer((self.laptop["addr"], self.laptop.get("port", 7)), H)
+                break
+            except OSError as e:
+                log.error("laptop: cannot listen on %s (%s); retrying in 15 s", self.laptop["addr"], e)
+                time.sleep(15)
+        srv.daemon_threads = True
+        srv.serve_forever()
+
+    def laptop_probe(self):
+        """Every 5 s: a few exchanges from this laptop's address to the peer laptop. Source and destination are inside the
+        protected subnets, so they only get through when the tunnel encrypts them."""
+        lp = self.laptop
+        while True:
+            vals = []
+            for _ in range(3):
+                t0 = time.perf_counter()
+                try:
+                    with socket.create_connection((lp["peer"], lp.get("port", 7)), timeout=2, source_address=(lp["addr"], 0)) as c:
+                        c.sendall(b"hello\n")
+                        if c.recv(16).startswith(b"hello"):
+                            vals.append((time.perf_counter() - t0) * 1000)
+                except OSError:
+                    pass
+            lp.update(sent=lp["sent"] + 3, answered=lp["answered"] + len(vals), ok=bool(vals),
+                      ms=round(sorted(vals)[len(vals) // 2], 1) if vals else None, last=time.time())
+            time.sleep(5)
 
     # master side
     def rotate(self, c):
@@ -197,7 +239,7 @@ class Exchange:
         log.info("%s: applied seq=%d key_id=%s", c["name"], b["seq"], key_id)
 
     def status(self):
-        return {"sae_id": self.cfg["sae_id"], "kme": self.cfg["kme"]["url"], "kme_ms": self.kme_ms, "consumers": self.state}
+        return {"sae_id": self.cfg["sae_id"], "kme": self.cfg["kme"]["url"], "kme_ms": self.kme_ms, "laptop": self.laptop, "consumers": self.state}
 
 
 def make_server(addr, port, handler, what):
@@ -262,7 +304,11 @@ def parse_ipsec(txt):
     if "ESTABLISHED" not in txt:
         return {"state": "down", "children": 0}
     m = re.search(r"established (\d+)s ago", txt)
-    return {"state": "established", "age_s": int(m.group(1)) if m else None, "children": txt.count("INSTALLED")}
+    out = {"state": "established", "age_s": int(m.group(1)) if m else None, "children": txt.count("INSTALLED")}
+    for d in ("in", "out"):                                   # ESP counters of the child SAs: proof that traffic is encrypted
+        c = re.findall(r"^\s+%s\s+\w+,\s+(\d+) bytes,\s+(\d+) packets" % d, txt, re.M)
+        out["bytes_" + d], out["pkts_" + d] = sum(int(b) for b, _ in c), sum(int(k) for _, k in c)
+    return out
 
 
 def parse_macsec(txt):
@@ -364,7 +410,7 @@ class Console:
                "peer_sae": next(iter(ex.cons.values()))["peer_sae"], "consumers": mine,
                "ipsec": parse_ipsec(read_state(self.cfg.get("ipsec_file", "/state/ipsec.txt"))),
                "macsec": parse_macsec(read_state(self.cfg.get("macsec_file", "/state/macsec.txt"))),
-               "latency_ms": self.latency(), "kme_ms": ex.kme_ms, "link": dict(self.state), "peer": None}
+               "latency_ms": self.latency(), "kme_ms": ex.kme_ms, "laptop": ex.laptop, "link": dict(self.state), "peer": None}
         if self.state["linked"]:
             try:
                 out["peer"] = ex.peer_get("/v1/status")

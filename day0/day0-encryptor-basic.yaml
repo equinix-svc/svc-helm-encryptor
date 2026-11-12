@@ -81,7 +81,7 @@ write_files:
       K="/usr/local/bin/k3s kubectl"
       MAN=/var/lib/rancher/k3s/server/manifests
       NS=encryptor
-      for v in QKD_ROLE PEER_ADDR IKE_PSK REGISTRY_USER REGISTRY_TOKEN; do
+      for v in QKD_ROLE IKE_PSK REGISTRY_USER REGISTRY_TOKEN; do
         [ -n "${!v:-}" ] || { echo "missing required parameter $v"; exit 1; }
       done
       if [ "$QKD_ROLE" = master ]; then
@@ -90,12 +90,14 @@ write_files:
         done
         FQDN="$(printf '%s' "$FQDN" | tr 'A-Z' 'a-z')"
       fi
-      # BASIC defaults: fixed SAE IDs, KME simulator on the master
+      # BASIC defaults: fixed SAE IDs, the lab links on fixed private addresses (.11 master, .12 slave), KME simulator on the master
+      case "$QKD_ROLE" in master) D1=11; D2=12 ;; slave) D1=12; D2=11 ;; *) echo "QKD_ROLE must be master|slave"; exit 1 ;; esac
+      LOCAL_ADDR="${LOCAL_ADDR:-172.16.0.$D1}"; PEER_ADDR="${PEER_ADDR:-172.16.0.$D2}"           # ens5: encryptor link
+      KME_ADDR="${KME_ADDR:-192.168.50.$D1}"; KME_PEER_ADDR="${KME_PEER_ADDR:-192.168.50.$D2}"  # ens6: KME channel
       INSTALL_KME_SIM=no
       case "$QKD_ROLE" in
-        master) SAE_ID=SAE-A; PEER_SAE_ID=SAE-B; KME_URL="http://${KME_ADDR:-${LOCAL_ADDR:-127.0.0.1}}:8443"; INSTALL_KME_SIM=yes ;;
-        slave)  SAE_ID=SAE-B; PEER_SAE_ID=SAE-A; KME_URL="http://${KME_PEER_ADDR:-$PEER_ADDR}:8443" ;;
-        *) echo "QKD_ROLE must be master|slave"; exit 1 ;;
+        master) SAE_ID=SAE-A; PEER_SAE_ID=SAE-B; KME_URL="http://$KME_ADDR:8443"; INSTALL_KME_SIM=yes ;;
+        slave)  SAE_ID=SAE-B; PEER_SAE_ID=SAE-A; KME_URL="http://$KME_PEER_ADDR:8443" ;;
       esac
       NODE_IP="${LOCAL_ADDR:-$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')}"
       BIND=""; [ -n "${LOCAL_ADDR:-}" ] && BIND=',"bind":"'"$LOCAL_ADDR"'"'
@@ -196,9 +198,9 @@ write_files:
       }
       EXTRA=""; [ "${INSTALL_KME_SIM:-}" = yes ] && EXTRA=dev-kme-sim.yaml
       for f in encryptor.yaml $EXTRA; do fetch "$f"; done
-      # the lab KME simulator listens only on its KME channel address (KME_ADDR, else LOCAL_ADDR) when one is set
-      SIMBIND="${KME_ADDR:-${LOCAL_ADDR:-}}"
-      [ -n "$EXTRA" ] && [ -n "$SIMBIND" ] && sed -i 's#args: \[sim, --port, "8443"\]#args: [sim, --bind, "'"$SIMBIND"'", --port, "8443"]#' "$MAN/dev-kme-sim.yaml"
+      # the lab KME simulator listens only on its KME channel address
+      SIMBIND="$KME_ADDR"
+      [ -n "$EXTRA" ] && sed -i 's#args: \[sim, --port, "8443"\]#args: [sim, --bind, "'"$SIMBIND"'", --port, "8443"]#' "$MAN/dev-kme-sim.yaml"
       # Login banner (best effort: never stops the install)
       curl -fsSL --retry 3 -H "Accept: application/vnd.github.raw" \
         "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/scripts/motd.sh" -o /etc/profile.d/qkd-encryptor-motd.sh \

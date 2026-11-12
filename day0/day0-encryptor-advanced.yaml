@@ -86,9 +86,13 @@ write_files:
       for v in SAE_ID PEER_SAE_ID QKD_ROLE PEER_ADDR IKE_PSK REGISTRY_USER REGISTRY_TOKEN; do
         [ -n "${!v:-}" ] || { echo "missing required parameter $v"; exit 1; }
       done
-      # no KME_URL: lab, one KME simulator per appliance (each listens on KME_ADDR (else LOCAL_ADDR) when set), linked by a simulated QKD link
+      # no KME_URL: lab, one KME simulator per appliance (each listens on KME_ADDR, default 192.168.50.11 master / .12 slave), linked by a simulated QKD link
       INSTALL_KME_SIM=no
-      if [ -z "${KME_URL:-}" ]; then KME_URL="http://${KME_ADDR:-${LOCAL_ADDR:-127.0.0.1}}:8443"; INSTALL_KME_SIM=yes; fi
+      if [ -z "${KME_URL:-}" ]; then
+        case "$QKD_ROLE" in master) D1=11; D2=12 ;; *) D1=12; D2=11 ;; esac
+        KME_ADDR="${KME_ADDR:-192.168.50.$D1}"; KME_PEER_ADDR="${KME_PEER_ADDR:-192.168.50.$D2}"   # ens6: KME channel
+        KME_URL="http://$KME_ADDR:8443"; INSTALL_KME_SIM=yes
+      fi
       if [ "$QKD_ROLE" = master ]; then
         for v in FQDN ADMIN_EMAIL; do
           [ -n "${!v:-}" ] || { echo "missing required parameter $v (the master console is served at https://FQDN)"; exit 1; }
@@ -195,8 +199,8 @@ write_files:
       for f in encryptor.yaml $EXTRA; do fetch "$f"; done
       # the lab KME simulators: each listens only on LOCAL_ADDR when it is set, and takes keys from the other one (the simulated QKD link)
       if [ -n "$EXTRA" ]; then
-        SIMBIND="${KME_ADDR:-${LOCAL_ADDR:-}}"; SIMARGS='sim'; [ -n "$SIMBIND" ] && SIMARGS="$SIMARGS, --bind, \"$SIMBIND\""
-        sed -i "s#args: \[sim, --port, \"8443\"\]#args: [$SIMARGS, --peer, \"http://${KME_PEER_ADDR:-$PEER_ADDR}:8443\", --port, \"8443\"]#" "$MAN/dev-kme-sim.yaml"
+        SIMARGS="sim, --bind, \"$KME_ADDR\""
+        sed -i "s#args: \[sim, --port, \"8443\"\]#args: [$SIMARGS, --peer, \"http://$KME_PEER_ADDR:8443\", --port, \"8443\"]#" "$MAN/dev-kme-sim.yaml"
       fi
       # Login banner (best effort: never stops the install)
       curl -fsSL --retry 3 -H "Accept: application/vnd.github.raw" \

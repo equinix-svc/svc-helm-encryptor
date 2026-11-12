@@ -146,6 +146,7 @@ write_files:
       connections {
         s2s {
           version = 2
+          mobike = no                    # stay on LOCAL_ADDR/PEER_ADDR: no migration to the public addresses
           local_addrs = $NODE_IP
           remote_addrs = $PEER_ADDR
           proposals = aes256gcm16-prfsha384-x25519

@@ -1,26 +1,12 @@
 #cloud-config
-# BASIC Day 0 (lab): the smallest set of portal parameters to bring up a pair of QKD encryptors for testing.
-# Same template family as day0-encryptor-advanced.yaml (ADVANCED), with defaults instead of per-site values:
-#   - SAE IDs are fixed: master = SAE-A, slave = SAE-B
-#   - the KME is the ETSI 014 SIMULATOR (random keys, NOT QKD), run on the master node; the slave points at it
-#   - no certificates: KME and peer API use plain HTTP, so restrict TCP 8443 and 8444 in the ACL to the peer only
-# Placeholders use the Equinix inline syntax (case-sensitive names).
-#   Equinix predefined: hostname userName publicKey adminPwd ipAddressWithCidr gateway
-#   Custom parameters : K3S_ROLE K3S_SERVER_URL K3S_TOKEN K3S_TLS_SAN   (as the k3s-node image, all optional)
-#     QKD_ROLE      master | slave                                       (required)
-#     IKE_PSK       IKEv2 secret, identical on both ends                 (required)
-#     PEER_ADDR     the other appliance's IP                             (required)
-#     LOCAL_ADDR    this appliance's own IP towards the peer (IKE source, peer API bind); default: address of the default route  (optional)
-#     LINK_IFACE    NIC that carries LOCAL_ADDR (written to a netplan file); default ens4 = portal interface2  (optional)
-#     MACSEC_IFACE  host NIC for MACsec, e.g. ens4 (empty = no MACsec)  (optional)
-#     MACSEC_ADDR   CIDR on the macsec interface, e.g. 10.99.0.1/24      (optional)
-#     LOCAL_TS REMOTE_TS  protected subnets (default: 10.1.0.0/24 behind the master, 10.2.0.0/24 behind the slave; a simulated laptop in each)  (optional)
-#     REGISTRY_USER REGISTRY_TOKEN  GitHub login and read:packages token to pull the private images from ghcr.io  (required)
-#     FQDN ADMIN_EMAIL ADMIN_PASSWORD  master only (ignored on a slave): public name of the console, served at https://FQDN with a
-#                   Let's Encrypt certificate (create the DNS record first); ADMIN_EMAIL = login name and certificate contact
-#                   (a real address); ADMIN_PASSWORD generated when empty. FQDN and ADMIN_EMAIL are required on the master.
+# BASIC Day 0 (lab) for the Network Edge profile "k3s-node": a pair of QKD encryptors with a KME simulator on the master (random keys,
+# NOT QKD, plain HTTP: restrict TCP 8443 and 8444 to the peer), SAE-A master and SAE-B slave, and a simulated laptop on each side.
+# Placeholders: Equinix inline syntax, case-sensitive.   Equinix: hostname userName publicKey adminPwd ipAddressWithCidr gateway
+# Required: QKD_ROLE (master|slave) IKE_PSK PEER_ADDR REGISTRY_USER REGISTRY_TOKEN; master also FQDN ADMIN_EMAIL (ADMIN_PASSWORD generated).
+# Optional: LOCAL_ADDR (ens5, encryptor link) CLUSTER_ADDR (ens4, k3s) KME_ADDR KME_PEER_ADDR (ens6, KME channel) LOCAL_TS REMOTE_TS
+#   (default 10.1.0.0/24 behind the master, 10.2.0.0/24 behind the slave) MACSEC_IFACE (e.g. ens7) MACSEC_ADDR K3S_ROLE K3S_SERVER_URL
+#   K3S_TOKEN K3S_TLS_SAN. Meaning and examples: README. The encryptor is installed on a single node or the first server only.
 # Equinix injects a STATIC address (no DHCP), so this file configures the network itself.
-# Roles (K3S_ROLE): single | server | agent  (the encryptor is only installed on single / first server)
 
 hostname: [(${hostname})]
 manage_etc_hosts: true
@@ -75,7 +61,9 @@ write_files:
       MACSEC_IFACE='[(${MACSEC_IFACE})]'
       MACSEC_ADDR='[(${MACSEC_ADDR})]'
       LOCAL_ADDR='[(${LOCAL_ADDR})]'
-      LINK_IFACE='[(${LINK_IFACE})]'
+      KME_ADDR='[(${KME_ADDR})]'
+      KME_PEER_ADDR='[(${KME_PEER_ADDR})]'
+      CLUSTER_ADDR='[(${CLUSTER_ADDR})]'
       REGISTRY_USER='[(${REGISTRY_USER})]'
       REGISTRY_TOKEN='[(${REGISTRY_TOKEN})]'
       FQDN='[(${FQDN})]'
@@ -104,8 +92,8 @@ write_files:
       # BASIC defaults: fixed SAE IDs, KME simulator on the master
       INSTALL_KME_SIM=no
       case "$QKD_ROLE" in
-        master) SAE_ID=SAE-A; PEER_SAE_ID=SAE-B; KME_URL="http://${LOCAL_ADDR:-127.0.0.1}:8443"; INSTALL_KME_SIM=yes ;;
-        slave)  SAE_ID=SAE-B; PEER_SAE_ID=SAE-A; KME_URL="http://$PEER_ADDR:8443" ;;
+        master) SAE_ID=SAE-A; PEER_SAE_ID=SAE-B; KME_URL="http://${KME_ADDR:-${LOCAL_ADDR:-127.0.0.1}}:8443"; INSTALL_KME_SIM=yes ;;
+        slave)  SAE_ID=SAE-B; PEER_SAE_ID=SAE-A; KME_URL="http://${KME_PEER_ADDR:-$PEER_ADDR}:8443" ;;
         *) echo "QKD_ROLE must be master|slave"; exit 1 ;;
       esac
       NODE_IP="${LOCAL_ADDR:-$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')}"
@@ -119,20 +107,9 @@ write_files:
       LOCAL_TS="${LOCAL_TS:-$LTS_DEF}"; REMOTE_TS="${REMOTE_TS:-$RTS_DEF}"
       host10() { printf '%s' "${1%/*}" | awk -F. '{print $1"."$2"."$3".10"}'; }
       LAPTOP_IP="$(host10 "$LOCAL_TS")"; PEER_LAPTOP_IP="$(host10 "$REMOTE_TS")"; LAPTOP_MASK="${LOCAL_TS#*/}"
-      # --- network files, kept across reboots: the peer link address on its NIC (portal interface2 = ens4 unless LINK_IFACE is set) in a netplan file and, in BASIC, the simulated laptop interface
-      LINK_IFACE="${LINK_IFACE:-ens4}"
-      NP=/etc/netplan/60-qkd-encryptor.yaml
-      if [ -n "${LOCAL_ADDR:-}" ] || [ -n "${LAPTOP_IP:-}" ]; then
-        if [ -n "${LOCAL_ADDR:-}" ]; then
-          printf 'network:\n  version: 2\n  ethernets:\n    %s:\n      addresses: [%s/24]\n' "$LINK_IFACE" "$LOCAL_ADDR" > "$NP"; chmod 0600 "$NP"
-        fi
-        if [ -n "${LAPTOP_IP:-}" ]; then      # netplan has no dummy device here: systemd-networkd files, same mechanism underneath
-          printf '[NetDev]\nName=laptop0\nKind=dummy\n' > /etc/systemd/network/40-laptop0.netdev
-          printf '[Match]\nName=laptop0\n\n[Network]\nAddress=%s/%s\n' "$LAPTOP_IP" "$LAPTOP_MASK" > /etc/systemd/network/40-laptop0.network
-        fi
-        if netplan generate 2>/dev/null; networkctl reload; then networkctl reconfigure "$LINK_IFACE" laptop0 2>/dev/null || true; sleep 3
-        else echo "WARNING: network files not applied: set the address on $LINK_IFACE by hand"; fi
-      fi
+      # --- network files (kept across reboots): ens4 cluster, ens5 encryptor link, ens6 KME channel, laptop0 (BASIC); scripts/network.sh
+      LOCAL_ADDR="${LOCAL_ADDR:-}" KME_ADDR="${KME_ADDR:-}" CLUSTER_ADDR="${CLUSTER_ADDR:-}" LAPTOP_IP="${LAPTOP_IP:-}" LAPTOP_MASK="${LAPTOP_MASK:-}" \
+        /usr/local/bin/day0-network.sh || echo "WARNING: network files not applied: set the NIC addresses by hand"
       if [ -n "${LOCAL_ADDR:-}" ] && ! ip -4 -o addr show | grep -qw "$LOCAL_ADDR"; then echo "WARNING: LOCAL_ADDR $LOCAL_ADDR is not set on any interface; the peer API and IPsec wait until it exists"; fi
 
       W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
@@ -218,8 +195,9 @@ write_files:
       }
       EXTRA=""; [ "${INSTALL_KME_SIM:-}" = yes ] && EXTRA=dev-kme-sim.yaml
       for f in encryptor.yaml $EXTRA; do fetch "$f"; done
-      # the lab KME simulator listens only on LOCAL_ADDR when it is set (the peer-facing address), not on every address
-      [ -n "$EXTRA" ] && [ -n "${LOCAL_ADDR:-}" ] && sed -i 's#args: \[sim, --port, "8443"\]#args: [sim, --bind, "'"$LOCAL_ADDR"'", --port, "8443"]#' "$MAN/dev-kme-sim.yaml"
+      # the lab KME simulator listens only on its KME channel address (KME_ADDR, else LOCAL_ADDR) when one is set
+      SIMBIND="${KME_ADDR:-${LOCAL_ADDR:-}}"
+      [ -n "$EXTRA" ] && [ -n "$SIMBIND" ] && sed -i 's#args: \[sim, --port, "8443"\]#args: [sim, --bind, "'"$SIMBIND"'", --port, "8443"]#' "$MAN/dev-kme-sim.yaml"
       # Login banner (best effort: never stops the install)
       curl -fsSL --retry 3 -H "Accept: application/vnd.github.raw" \
         "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/scripts/motd.sh" -o /etc/profile.d/qkd-encryptor-motd.sh \
@@ -304,7 +282,11 @@ write_files:
       mkdir -p /etc/rancher/k3s
       CFG=/etc/rancher/k3s/config.yaml
       : > "$CFG"; chmod 0600 "$CFG"
-      [ -n "$NODE_IP" ] && echo "node-ip: $NODE_IP" >> "$CFG"
+      curl -fsSL --retry 3 -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/scripts/network.sh" -o /usr/local/bin/day0-network.sh && chmod 0755 /usr/local/bin/day0-network.sh || echo "network script not downloaded"
+      if [ -n "$CLUSTER_ADDR" ]; then          # k3s cluster traffic on ens4: the address must exist before k3s starts
+        CLUSTER_ADDR="$CLUSTER_ADDR" /usr/local/bin/day0-network.sh || { echo "cluster NIC not configured"; exit 1; }
+        printf 'node-ip: %s\nnode-external-ip: %s\nflannel-iface: ens4\n' "$CLUSTER_ADDR" "$NODE_IP" >> "$CFG"
+      elif [ -n "$NODE_IP" ]; then echo "node-ip: $NODE_IP" >> "$CFG"; fi
       [ -n "$K3S_TOKEN" ] && echo "token: \"$K3S_TOKEN\"" >> "$CFG"
 
       case "$ROLE" in
@@ -361,7 +343,7 @@ write_files:
       # Encryptor stack: single node or first server only
       if [ "$UNIT" = k3s ] && [ -z "$K3S_SERVER_URL" ]; then
         echo "installing the encryptor stack"
-        QKD_ROLE="$QKD_ROLE" PEER_ADDR="$PEER_ADDR" IKE_PSK="$IKE_PSK" LOCAL_ADDR="$LOCAL_ADDR" LINK_IFACE="$LINK_IFACE" REGISTRY_USER="$REGISTRY_USER" REGISTRY_TOKEN="$REGISTRY_TOKEN" \
+        QKD_ROLE="$QKD_ROLE" PEER_ADDR="$PEER_ADDR" IKE_PSK="$IKE_PSK" LOCAL_ADDR="$LOCAL_ADDR" KME_ADDR="$KME_ADDR" KME_PEER_ADDR="$KME_PEER_ADDR" CLUSTER_ADDR="$CLUSTER_ADDR" REGISTRY_USER="$REGISTRY_USER" REGISTRY_TOKEN="$REGISTRY_TOKEN" \
         FQDN="$FQDN" ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" \
         LOCAL_TS="$LOCAL_TS" REMOTE_TS="$REMOTE_TS" MACSEC_IFACE="$MACSEC_IFACE" MACSEC_ADDR="$MACSEC_ADDR" \
         /usr/local/bin/day0-encryptor.sh \

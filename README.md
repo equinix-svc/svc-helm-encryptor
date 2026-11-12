@@ -62,11 +62,13 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 | `REGISTRY_TOKEN` | yes | yes | - | `ghp_AbCdEf1234567890AbCdEf1234567890AbCd` | Classic personal access token with only `read:packages`. Written to `/etc/rancher/k3s/registries.yaml` (root only) before k3s starts. Expires: set a reminder to rotate it. |
 | `FQDN` | yes | yes | - | `fred-enc-par01.example.net` | Master only (ignored on a slave). Public name of the console, served at `https://<FQDN>` with a Let's Encrypt certificate. The master's public IP is only known after creation, so create the DNS record afterwards: the node waits (checks every 30 seconds) until `<FQDN>` resolves to it, then enables the certificate, so the first Let's Encrypt attempt succeeds. The login banner shows the IP to use and what the name resolves to now (`not found` or `WRONG` when it points elsewhere, for example after a rebuild with a new IP). Keep port 80 reachable from the internet. |
 | `ADMIN_EMAIL` | yes | yes | - | `xxxx@eu.equinix.com` | Master only. Login name of the console, and contact address for the Let's Encrypt certificate: it must be a real address. |
-| `LOCAL_ADDR` | no | no | address of the default route | `172.16.0.11` | This appliance's own IP towards the peer. It is the IKE source address and the only address the peer API (and, in BASIC, the KME simulator) listens on. Leave it empty and they listen on every address of the node, so restrict TCP 8443 and 8444 to the peer in the ACL. Set it when the peer is reached over a second interface or subnet. |
-| `LINK_IFACE` | no | no | `ens4` | `ens4` | NIC that carries `LOCAL_ADDR` (portal interface2). Day 0 writes the address to a netplan file on it. |
+| `LOCAL_ADDR` | no | no | address of the default route | `172.16.0.11` | This appliance's own IP towards the peer, on `ens5`. It is the IKE source address and the only address the peer API (and, in BASIC, the KME simulator) listens on. Leave it empty and they listen on every address of the node, so restrict TCP 8443 and 8444 to the peer in the ACL. Set it when the peer is reached over a second interface or subnet. |
+| `CLUSTER_ADDR` | no | no | empty (cluster traffic on the default route) | `172.16.2.11` | This node's address on `ens4` for the k3s cluster traffic (API 6443, etcd, kubelet, VXLAN). When set, k3s starts with `node-ip` and `flannel-iface` on it. Join with `K3S_SERVER_URL=https://<first node's CLUSTER_ADDR>:6443`. |
+| `KME_ADDR` | no | no | `LOCAL_ADDR` | `172.16.1.11` | This appliance's address on `ens6`, the KME to KME channel. The lab KME simulator listens on it, and the appliance reaches its KME there. |
+| `KME_PEER_ADDR` | no | no | `PEER_ADDR` | `172.16.1.12` | The other appliance's address on the KME channel: the simulated QKD link between the two simulators, and in BASIC the slave's route to the master's simulator. |
 | `LOCAL_TS` | no | no | BASIC: `10.1.0.0/24` on the master, `10.2.0.0/24` on the slave. ADVANCED: `LOCAL_ADDR` | `10.1.0.0/24` | Local protected subnet. In BASIC a simulated laptop lives at `.10` of it (see Console). Never `0.0.0.0/0` on a node you manage over its public address: it would send all the node's traffic, SSH included, into the tunnel. |
 | `REMOTE_TS` | no | no | BASIC: the other side's subnet. ADVANCED: `PEER_ADDR` | `10.2.0.0/24` | Remote protected subnet. Same warning. |
-| `MACSEC_IFACE` | no | no | empty (no MACsec) | `ens4` | Host NIC for MACsec. |
+| `MACSEC_IFACE` | no | no | empty (no MACsec) | `ens7` | Host NIC for MACsec. |
 | `MACSEC_ADDR` | no | no | empty (no address) | `10.99.0.1/24` | CIDR on the macsec interface. |
 | `K3S_ROLE` | no | no | `single` | `single` | `single`: standalone node. `server`: control-plane node. `agent`: k3s worker node that joins an existing cluster; the encryptor is not installed on it. |
 | `K3S_SERVER_URL` | no | no | empty | `https://10.0.0.5:6443` | Agent only. URL used by an agent to join the k3s cluster. Empty for `single` or the first `server`. |
@@ -83,24 +85,25 @@ BASIC uses plain HTTP for the KME and the peer API. ADVANCED does too when `KME_
 
 ### Network between the appliances
 
-A Network Edge device created with 5 interfaces has one Linux NIC per portal interface, in order from `ens3`. Day 0 configures `ens3` and, when `LOCAL_ADDR` is set, the link NIC (`LINK_IFACE`, default `ens4`) through a netplan file, so the address survives a reboot.
+A Network Edge device created with 5 interfaces has one Linux NIC per portal interface, in order from `ens3`. Each NIC has one job and its own private subnet:
 
-| Portal interface | NIC | Use |
-|---|---|---|
-| interface1 | `ens3` | management: SSH, Internet Access, the public console |
-| interface2 | `ens4` | link to the other appliance: `LOCAL_ADDR` and `PEER_ADDR` (IKE, peer API, KME simulator) |
-| interface3 | `ens5` | `MACSEC_IFACE`: a NIC dedicated to MACsec |
-| interface4, interface5 | `ens6`, `ens7` | spare |
+| Portal interface | NIC | Use | Subnet (proposed) | Day 0 parameter |
+|---|---|---|---|---|
+| interface1 | `ens3` | management: SSH, Internet Access, the public console | public | - |
+| interface2 | `ens4` | k3s cluster exchange: API, etcd, kubelet, VXLAN | `172.16.2.0/24` | `CLUSTER_ADDR` |
+| interface3 | `ens5` | encryptor to encryptor: IKE, peer API (master to slave) | `172.16.0.0/24` | `LOCAL_ADDR`, `PEER_ADDR` |
+| interface4 | `ens6` | KME to KME channel: the lab simulators' QKD link, and the slave's route to the master's simulator in BASIC | `172.16.1.0/24` | `KME_ADDR`, `KME_PEER_ADDR` |
+| interface5 | `ens7` | `MACSEC_IFACE`: a NIC dedicated to MACsec | none | - |
 
-The portal lists each interface's MAC address (device details) and `ip -br link` shows it on the node, so the mapping can be checked.
+The three subnets are inside `172.16.0.0/16` and never overlap the k3s pod and service ranges (`10.42.0.0/16`, `10.43.0.0/16`) or the BASIC laptop subnets (`10.1.0.0/24`, `10.2.0.0/24`). Use the same host number on every subnet (`.11` on the master, `.12` on the slave) to keep them easy to read. Day 0 writes the addresses with [`scripts/network.sh`](scripts/network.sh), as a netplan file on the NICs and systemd-networkd files for the dummy laptop interface (this netplan has no dummy device). The portal lists each interface's MAC address (device details) and `ip -br link` shows it on the node, so the mapping can be checked.
 
-1. In the portal, create a Layer 2 link between `interface2` of both devices (a device link in the same metro, or a Fabric connection).
-2. Day 0 has already written `/etc/netplan/60-qkd-encryptor.yaml` with `LOCAL_ADDR/24` on `ens4`. The address shows up as soon as the link carries traffic; to set it by hand instead: `sudo ip link set ens4 up && sudo ip addr add 172.16.0.11/24 dev ens4`.
+1. In the portal, create one Layer 2 link per NIC role between the two devices: `interface3` to `interface3` (encryptor), `interface4` to `interface4` (KME), and `interface2` to `interface2` for a cluster (a device link in the same metro, or a Fabric connection).
+2. Day 0 has already written `/etc/netplan/60-qkd-encryptor.yaml`. The addresses show up as soon as the links carry traffic. To set one by hand: `sudo ip link set ens5 up && sudo ip addr add 172.16.0.11/24 dev ens5`.
 3. Check with `ping <PEER_ADDR>`, then `check-install.sh`. The console shows the IPsec link once the peer answers.
 
 IPsec only encrypts traffic that matches `LOCAL_TS` and `REMOTE_TS`, and the strongSwan image leaves traffic inside a directly attached subnet (here `172.16.0.0/24`) outside the tunnel. Pinging `PEER_ADDR` therefore proves the link, not the encryption. Protect subnets behind the appliances, as the BASIC simulated laptops do.
 
-Until `LOCAL_ADDR` exists on an interface, the peer API and the simulator retry every 15 seconds, the IPsec tunnel stays `CONNECTING`, and the Day 0 log carries a warning. With both addresses private, the key exchange does not use the public interface.
+Until an address exists on its NIC, the peer API and the simulator retry every 15 seconds, the IPsec tunnel stays `CONNECTING`, and the Day 0 log carries a warning. With the addresses private, the key exchange does not use the public interface.
 
 ## 4. Load KME certificates after boot
 
@@ -165,7 +168,7 @@ The master serves a small web console: the appliance pair as two nodes joined by
 - **PPK ID:** it is fixed, so a brief key-switch window can fail an authentication. That is retried.
 - **SSH:** QKD can't plug into the SSH transport itself. qkd-exchange only rotates key pairs, and you still need to wire them into `sshd` or a CA.
 - **Public name:** Let's Encrypt issued the console certificate on a real node. Traefik requests it about a second after it starts, so its Deployment uses the `Recreate` strategy and its Service publishes not-ready addresses; otherwise the validation reaches the old pod or no pod and fails. `sudo cat /etc/encryptor/dns-wait.state` shows the state, and `check-install.sh` shows the certificate issuer.
-- **Untested:** the netplan file that keeps the `ens4` address across reboots, a real KME (certificate and SAE ID mapping vary by vendor), the images pulled from ghcr.io on a real node, Equinix Network Edge devices, and the Fabric link between them (including whether the virtual switch passes MACsec frames).
+- **Untested:** the netplan file that keeps the NIC addresses across reboots, k3s with `CLUSTER_ADDR`, a real KME (certificate and SAE ID mapping vary by vendor), the images pulled from ghcr.io on a real node, Equinix Network Edge devices, and the Fabric link between them (including whether the virtual switch passes MACsec frames).
 - **IKE authentication:** it uses a shared secret (`IKE_PSK`) for now. Certificates would be better for production.
 - **Day 0 size:** the templates are about 14 KB, under the portal limit of 20,000 characters. No certificate goes through Day 0.
 - **Secrets in Day 0:** the Day 0 files hold no secret. `IKE_PSK` (and `K3S_TOKEN` for an agent, `REGISTRY_TOKEN`) still travel as portal parameters and end up in a Kubernetes Secret on the node, readable by root.

@@ -13,7 +13,7 @@
 #     LOCAL_ADDR    this appliance's own IP towards the peer (IKE source, peer API bind); default: address of the default route  (optional)
 #     MACSEC_IFACE  host NIC for MACsec, e.g. ens4 (empty = no MACsec)  (optional)
 #     MACSEC_ADDR   CIDR on the macsec interface, e.g. 10.99.0.1/24      (optional)
-#     LOCAL_TS REMOTE_TS  protected subnets (default 0.0.0.0/0)          (optional)
+#     LOCAL_TS REMOTE_TS  protected subnets (default: the two appliance addresses only)          (optional)
 #     REGISTRY_USER REGISTRY_TOKEN  GitHub login and read:packages token to pull the private images from ghcr.io  (required)
 #     FQDN ADMIN_EMAIL ADMIN_PASSWORD  master only (ignored on a slave): public name of the console, served at https://FQDN with a
 #                   Let's Encrypt certificate (create the DNS record first); ADMIN_EMAIL = login name and certificate contact
@@ -102,7 +102,7 @@ write_files:
       # BASIC defaults: fixed SAE IDs, KME simulator on the master
       INSTALL_KME_SIM=no
       case "$QKD_ROLE" in
-        master) SAE_ID=SAE-A; PEER_SAE_ID=SAE-B; KME_URL=http://127.0.0.1:8443; INSTALL_KME_SIM=yes ;;
+        master) SAE_ID=SAE-A; PEER_SAE_ID=SAE-B; KME_URL="http://${LOCAL_ADDR:-127.0.0.1}:8443"; INSTALL_KME_SIM=yes ;;
         slave)  SAE_ID=SAE-B; PEER_SAE_ID=SAE-A; KME_URL="http://$PEER_ADDR:8443" ;;
         *) echo "QKD_ROLE must be master|slave"; exit 1 ;;
       esac
@@ -161,8 +161,8 @@ write_files:
           }
           children {
             s2s {
-              local_ts = ${LOCAL_TS:-0.0.0.0/0}
-              remote_ts = ${REMOTE_TS:-0.0.0.0/0}
+              local_ts = ${LOCAL_TS:-$NODE_IP/32}
+              remote_ts = ${REMOTE_TS:-$PEER_ADDR/32}
               esp_proposals = aes256gcm16-x25519
               rekey_time = 30m
               start_action = $START

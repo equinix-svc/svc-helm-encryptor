@@ -165,8 +165,8 @@ write_files:
           }
           children {
             s2s {
-              local_ts = ${LOCAL_TS:-0.0.0.0/0}
-              remote_ts = ${REMOTE_TS:-0.0.0.0/0}
+              local_ts = ${LOCAL_TS:-$NODE_IP/32}
+              remote_ts = ${REMOTE_TS:-$PEER_ADDR/32}
               esp_proposals = aes256gcm16-x25519
               rekey_time = 30m
               start_action = $START

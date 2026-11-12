@@ -2,7 +2,7 @@
 # network.sh - addresses of the appliance NICs, written as files that survive a reboot. Run by Day 0. ens4 (the k3s private path) is
 # configured by the Day 0 bootstrap itself, before k3s starts. Environment, all optional, each address gets a /24:
 #   LOCAL_ADDR    ens5  encryptor to encryptor: IKE, peer API                  e.g. 172.16.0.11
-#   KME_ADDR      ens6  KME to KME channel (the lab simulators' QKD link)      e.g. 172.16.1.11
+#   KME_ADDR      ens6  KME to KME channel (the lab simulators' QKD link)      e.g. 192.168.50.11
 #   LAPTOP_IP / LAPTOP_MASK  BASIC lab: a simulated laptop on a dummy interface laptop0
 # Portal interface N is the Linux NIC ens(N+2): interface2 = ens4 ... interface7 = ens9. ens3 (interface1) is the management NIC and
 # is not touched. NIC names can be overridden with NIC_LINK, NIC_KME. The NICs are addressed with a netplan file; the

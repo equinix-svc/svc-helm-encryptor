@@ -160,6 +160,7 @@ The master serves a small web console: the appliance pair as two nodes joined by
 - **MACsec on Equinix vNICs:** the virtual switch must pass EAPOL (`01:80:c2:00:00:03`) and EtherType `0x88e5` frames between the two appliances. This is untested. Use a dedicated NIC (`MACSEC_IFACE`), not the management one.
 - **MACsec image:** 256-bit MACsec needs `wpa_supplicant` 2.11 (`macsec_csindex`). Debian trixie ships 2.10 and Alpine has no MACsec driver, so the image uses `debian:sid-slim`. Pin it by digest once validated.
 - **MACsec rotation:** a new CAK starts a new MKA session, which can interrupt traffic briefly. The default interval is 24 hours.
+- **Restarts:** the keys are held in memory only. A restarted slave reports an older sequence, and the master rotates again within 15 seconds; a restarted master rotates at start.
 - **PPK timing:** a new PPK only takes effect at the next IKE reauthentication, not on child-SA rekeys.
 - **PPK ID:** it is fixed, so a brief key-switch window can fail an authentication. That is retried.
 - **SSH:** QKD can't plug into the SSH transport itself. qkd-exchange only rotates key pairs, and you still need to wire them into `sshd` or a CA.

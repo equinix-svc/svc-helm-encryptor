@@ -218,8 +218,25 @@ class Exchange:
                 self.state[c["name"]]["last_error"] = "%s: %s" % (type(e).__name__, e)
                 log.error("%s: rotation failed: %s", c["name"], e)
                 wait = c.get("retry", 30)
-            self.wake[c["name"]].wait(wait)       # "Rotate now" (console) sets the event to skip the wait
-            self.wake[c["name"]].clear()
+            deadline = time.time() + wait
+            while time.time() < deadline:
+                if self.wake[c["name"]].wait(min(15, max(0.0, deadline - time.time()))):
+                    self.wake[c["name"]].clear()  # "Rotate now" (console) skips the wait
+                    break
+                if self.peer_lost_key(c):         # the slave restarted: its keys live in memory only, so send new ones now
+                    log.warning("%s: the slave lost its key (restart?), rotating now", c["name"])
+                    break
+
+    def peer_lost_key(self, c):
+        """True when the slave reports an older sequence than ours (its pod restarted and its in-memory key is gone)."""
+        mine = self.state[c["name"]]["seq"]
+        if not mine:
+            return False
+        try:
+            theirs = self.peer_get("/v1/status", timeout=3)["consumers"][c["name"]]["seq"]
+        except Exception:  # noqa: BLE001 - peer down: the rotation itself reports that
+            return False
+        return theirs < mine
 
     # slave side (called by the peer API)
     def on_stage(self, b):

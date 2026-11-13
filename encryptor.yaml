@@ -53,7 +53,7 @@ spec:
             - { name: ssh, mountPath: /ssh }
             - { name: runstate, mountPath: /state, readOnly: true }
             - { name: persist, mountPath: /persist }
-          resources: { requests: { cpu: 20m, memory: 48Mi }, limits: { memory: 128Mi } }
+          resources: { requests: { cpu: 20m, memory: 48Mi }, limits: { memory: 192Mi } }
       volumes:
         - { name: site, configMap: { name: site } }
         - { name: kme-tls, secret: { secretName: kme-tls, optional: true, defaultMode: 0400 } }

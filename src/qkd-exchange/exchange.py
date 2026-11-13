@@ -203,11 +203,16 @@ class Exchange:
             return json.load(r)
 
     def peer_ctx(self):
+        """TLS context for the peer API, built once (loading the CA store on every call made the process grow); none for http."""
         p = self.cfg["peer"]
-        ctx = ssl.create_default_context(cafile=p.get("ca"))
-        if p.get("cert"):
-            ctx.load_cert_chain(p["cert"], p["key"])
-        return ctx
+        if not p["url"].startswith("https"):
+            return None
+        if getattr(self, "_peer_ctx", None) is None:
+            ctx = ssl.create_default_context(cafile=p.get("ca"))
+            if p.get("cert"):
+                ctx.load_cert_chain(p["cert"], p["key"])
+            self._peer_ctx = ctx
+        return self._peer_ctx
 
     def master_loop(self, c):
         while True:

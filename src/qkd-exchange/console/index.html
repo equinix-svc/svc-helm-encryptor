@@ -34,6 +34,11 @@
   .chips { display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 6px 32px; }
   .chip { background:var(--chip); color:#e6e6e6; font-size:12px; padding:3px 9px; border-radius:2px; }
   .chip.on { background:#fff; color:#222; }
+  button.chip { border:0; font:inherit; font-size:12px; cursor:pointer; } button.chip:hover { outline:1px solid #fff; } button.chip.active { outline:2px solid var(--blue); }
+  .detail { margin:6px 0 8px 32px; background:var(--side-dark); border-left:3px solid #55575c; padding:10px 12px; font-size:12px; color:var(--side-text); }
+  .detail .dr { display:flex; justify-content:space-between; gap:10px; padding:2px 0; } .detail .dr span { color:var(--side-dim); } .detail .dr b { font-weight:500; text-align:right; word-break:break-all; }
+  .detail pre { margin:8px 0 0; white-space:pre-wrap; word-break:break-all; font:11px/1.45 ui-monospace, Menlo, Consolas, monospace; color:#cfd0d3; max-height:230px; overflow:auto; }
+  .detail .note { margin-top:8px; color:var(--side-dim); }
   .kv { margin:6px 0 0 32px; font-size:13px; color:var(--side-dim); } .kv b { color:var(--side-text); font-weight:500; }
   .field { margin:10px 0 0 32px; display:flex; flex-direction:column; gap:5px; }
   .field label { font-size:12px; color:var(--side-dim); }
@@ -87,7 +92,8 @@
   <aside>
     <div class="card first">
       <h2>Encryptor (Master) <span style="font-size:13px;color:var(--side-dim)">(this appliance)</span></h2>
-      <div class="chips"><span class="chip on">IPsec</span><span class="chip on">MACsec</span><span class="chip on">SSH</span></div>
+      <div class="chips" id="techChips"><button class="chip" type="button" data-t="ipsec">IPsec</button><button class="chip" type="button" data-t="macsec">MACsec</button><button class="chip" type="button" data-t="ssh">SSH</button></div>
+      <div class="detail" id="detail" hidden></div>
       <div class="kv">SAE <b id="mSae">-</b></div>
       <div class="kv" id="mAddrRow" hidden>Encryptor link <b id="mAddr">-</b></div>
       <div class="kv">KME <b id="mKme">-</b></div>
@@ -140,6 +146,38 @@ function node(g, x, y, title, sub, tags, off) {
   tags.forEach((t, i) => { const tx = x + 18 + i * 66; n.append(el('rect', {x: tx, y: y + 84, width: 58, height: 22, rx: 2, class: 'tag'}), el('text', {x: tx + 29, y: y + 99, 'text-anchor': 'middle', class: 'tagt'}, t)); });
   g.append(n);
 }
+let openTech = ['ipsec', 'macsec', 'ssh'].includes(location.hash.slice(1)) ? location.hash.slice(1) : null;
+function techState(t) {
+  if (t === 'ipsec') return S.ipsec.state === 'established' ? ['running', true] : [S.ipsec.state || 'down', false];
+  if (t === 'macsec') return S.macsec.state === 'up' ? ['running', true] : S.macsec.state === 'idle' ? ['idle: no interface set', false] : [S.macsec.state || 'down', false];
+  const c = S.consumers.find(x => x.type === 'ssh'); return c && c.last_ok ? ['keys rotated, not a tunnel', true] : ['waiting for the first key', false];
+}
+function chips() {
+  document.querySelectorAll('#techChips .chip').forEach(b => { const on = techState(b.dataset.t)[1]; b.classList.toggle('on', on); b.classList.toggle('active', openTech === b.dataset.t); });
+}
+function detail() {
+  const box = $('#detail'); if (!openTech) { box.hidden = true; return; }
+  box.hidden = false; box.replaceChildren();
+  const t = openTech, c = S.consumers.find(x => x.type === t);
+  const add = (k, v) => { const d = document.createElement('div'); d.className = 'dr'; const a = document.createElement('span'); a.textContent = k; const b = document.createElement('b'); b.textContent = v; d.append(a, b); box.append(d); };
+  const pre = x => { if (!x) return; const e = document.createElement('pre'); e.textContent = x; box.append(e); };
+  const note = x => { const e = document.createElement('div'); e.className = 'note'; e.textContent = x; box.append(e); };
+  add(({ipsec: 'IPsec', macsec: 'MACsec', ssh: 'SSH'})[t], techState(t)[0]);
+  if (c) { add('QKD key every', dur(c.interval)); add('Key sequence', '#' + c.seq); add('Last key', age(c.last_ok)); if (c.key_id) add('Key ID', c.key_id.slice(0, 8) + '...'); }
+  if (t === 'ipsec') {
+    const ip = S.ipsec;
+    if (ip.state === 'established') { add('Up for', dur(ip.age_s)); add('Child SAs', String(ip.children)); add('ESP packets', ip.pkts_out + ' out · ' + ip.pkts_in + ' in'); }
+    if (S.laptop) add('Protected subnets', S.laptop.local_ts + ' ↔ ' + S.laptop.remote_ts);
+    pre(ip.raw); note('The QKD key is the PPK of the IKE authentication, which is required: no tunnel without it.');
+  } else if (t === 'macsec') {
+    pre(S.macsec.raw);
+    note(S.macsec.state === 'idle' ? 'No MACsec interface is configured (MACSEC_IFACE is empty), so nothing is running. The QKD key (CAK) is still rotated.' : 'The QKD key is the MACsec CAK; wpa_supplicant runs the MKA session.');
+  } else {
+    if (S.ssh) { add('Fingerprint', S.ssh.fp || '-'); pre(S.ssh.pub); }
+    note('Rotates an Ed25519 key pair on the appliance. It is a key rotation, not a tunnel: wiring the key into sshd or a CA is up to you.');
+  }
+}
+document.querySelectorAll('#techChips .chip').forEach(b => b.onclick = () => { openTech = openTech === b.dataset.t ? null : b.dataset.t; if (S) { chips(); detail(); } });
 function draw() {
   const root = $('#diagram'); root.innerHTML = '';
   const g = el('g', {transform: S.laptop ? 'translate(0,100)' : 'translate(0,0)'}); root.append(g);
@@ -167,8 +205,8 @@ function laptopbox(g, x, y, title, sub, res, ok, off) {
 const lres = st => st && st.ok ? 'to ' + st.peer + '  \u00b7  ' + st.ms + ' ms via tunnel' : 'to ' + (st ? st.peer : '-') + '  \u00b7  no answer';
 function laptops(g, linked) {
   const L = S.laptop, pl = linked && S.peer && !S.peer.error ? S.peer.laptop : null;
-  laptopbox(g, 40, 6, 'Laptop (simulated)', L.addr + '  \u00b7  LOCAL_TS ' + (L.local_ts || ''), lres(L), L.ok, false);
-  laptopbox(g, 630, 6, 'Laptop (simulated)', L.peer + '  \u00b7  REMOTE_TS ' + (L.remote_ts || ''), pl ? lres(pl) : 'not linked', pl && pl.ok, !linked);
+  laptopbox(g, 40, 6, 'Laptop (simulated)', L.addr, lres(L), L.ok, false);
+  laptopbox(g, 630, 6, 'Laptop (simulated)', L.peer, pl ? lres(pl) : 'not linked', pl && pl.ok, !linked);
   g.append(el('line', {x1: 155, y1: 78, x2: 155, y2: 195, class: 'lan'}), el('line', {x1: 745, y1: 78, x2: 745, y2: 195, class: !linked ? 'lan off' : 'lan'}));
 }
 const hp = u => { try { const x = new URL(u); return x.host; } catch (e) { return u || '-'; } };
@@ -212,11 +250,11 @@ function table() {
 function side() {
   $('#crumbSae').textContent = S.sae_id; $('#mSae').textContent = S.sae_id; $('#mKme').textContent = S.kme + (S.kme_ms != null ? ' \u00b7 ' + S.kme_ms + ' ms' : ' \u00b7 unreachable'); $('#mPeerSae').textContent = S.peer_sae;
   $('#mLanRow').hidden = $('#sLanRow').hidden = !S.laptop;
-  if (S.laptop) { $('#mLan').textContent = S.laptop.addr + ' in ' + (S.laptop.local_ts || '-'); $('#sLan').textContent = S.laptop.peer + ' in ' + (S.laptop.remote_ts || '-'); }
+  if (S.laptop) { $('#mLan').textContent = S.laptop.addr; $('#sLan').textContent = S.laptop.peer; }
   $('#mAddrRow').hidden = !S.addr; $('#mAddr').textContent = S.addr || '-'; $('#sAddr').textContent = S.peer_addr || '-';
   $('#peer').value = S.peer_addr; if (document.activeElement !== $('#fabric')) $('#fabric').value = S.link.fabric || '';
   const l = S.link.linked, sc = $('#slaveCard');
-  sc.classList.toggle('off', !l); $('#slaveHint').textContent = l ? '(linked' + (S.link.fabric ? ' · ' + S.link.fabric : '') + ')' : '(not linked)';
+  sc.classList.toggle('off', !l); $('#slaveHint').textContent = l ? '' : '(not linked)';
   $('#sInfo').hidden = !(l && S.peer && S.peer.sae_id); if (l && S.peer && S.peer.sae_id) { $('#sSae').textContent = S.peer.sae_id; $('#sKme').textContent = (S.peer.kme || '-') + (S.peer.kme_ms != null ? ' \u00b7 ' + S.peer.kme_ms + ' ms' : ' \u00b7 unreachable'); }
   $('#linkBtn').hidden = l; $('#unlinkBtn').hidden = !l; $('#fabric').readOnly = l;
   $('#rotate').disabled = !l || busy;
@@ -224,7 +262,7 @@ function side() {
   $('#dot').className = 'dot ' + (!l ? 'warn' : bad ? 'bad' : 'ok'); $('#status').textContent = !l ? 'Slave not linked' : bad ? 'Degraded' : 'Linked';
 }
 async function load() {
-  try { const r = await fetch('api/status'); S = await r.json(); $('#clock').textContent = new Date().toLocaleTimeString(); side(); draw(); table(); }
+  try { const r = await fetch('api/status'); S = await r.json(); $('#clock').textContent = new Date().toLocaleTimeString(); side(); chips(); detail(); draw(); table(); }
   catch (e) { $('#dot').className = 'dot bad'; $('#status').textContent = 'Console unreachable'; }
 }
 async function post(path, body) {

@@ -330,6 +330,7 @@ def parse_ipsec(txt):
     for d in ("in", "out"):                                   # ESP counters of the child SAs: proof that traffic is encrypted
         c = re.findall(r"^\s+%s\s+\w+,\s+(\d+) bytes,\s+(\d+) packets" % d, txt, re.M)
         out["bytes_" + d], out["pkts_" + d] = sum(int(b) for b, _ in c), sum(int(k) for _, k in c)
+    out["raw"] = "\n".join(l.rstrip() for l in txt.splitlines() if l.strip())[:1800]      # swanctl output: no secret in it
     return out
 
 
@@ -338,7 +339,17 @@ def parse_macsec(txt):
         return {"state": "unknown"}
     if not txt.strip():
         return {"state": "idle"}
-    return {"state": "up" if " UP" in txt or "UP " in txt else "down"}
+    return {"state": "up" if " UP" in txt or "UP " in txt else "down", "raw": txt.strip()[:600]}
+
+
+def ssh_info(directory):
+    """Public half of the rotated SSH key pair (never the private key): the key and its fingerprint."""
+    try:
+        pub = open(os.path.join(directory, "id_ed25519.pub")).read().strip()
+        fp = "SHA256:" + base64.b64encode(hashlib.sha256(base64.b64decode(pub.split()[1])).digest()).decode().rstrip("=")
+    except (OSError, IndexError, ValueError):
+        return None
+    return {"pub": pub[:140], "fp": fp}
 
 
 def tcp_latency_ms(host, port, n=3):
@@ -432,7 +443,7 @@ class Console:
                "peer_sae": next(iter(ex.cons.values()))["peer_sae"], "consumers": mine,
                "ipsec": parse_ipsec(read_state(self.cfg.get("ipsec_file", "/state/ipsec.txt"))),
                "macsec": parse_macsec(read_state(self.cfg.get("macsec_file", "/state/macsec.txt"))),
-               "latency_ms": self.latency(), "addr": ex.cfg["peer"].get("bind"), "kme_ms": ex.kme_ms, "kme_sim": bool(ex.cfg["kme"].get("sim")), "laptop": ex.laptop, "link": dict(self.state), "peer": None}
+               "latency_ms": self.latency(), "addr": ex.cfg["peer"].get("bind"), "kme_ms": ex.kme_ms, "kme_sim": bool(ex.cfg["kme"].get("sim")), "laptop": ex.laptop, "ssh": ssh_info(next((c["dir"] for c in ex.cons.values() if c["type"] == "ssh"), "/ssh")), "link": dict(self.state), "peer": None}
         if self.state["linked"]:
             try:
                 out["peer"] = ex.peer_get("/v1/status")

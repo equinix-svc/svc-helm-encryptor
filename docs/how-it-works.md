@@ -6,7 +6,7 @@ What each box and acronym is, and who talks to whom, for the four things the app
 
 - **QKD** (Quantum Key Distribution) makes the *same random key* appear at two sites, so nobody on the line could have copied it without being noticed. It produces keys. It does not encrypt anything.
 - A **KME** (Key Management Entity) is the server in front of a QKD system. It stores those keys and gives them to applications through a REST API ([ETSI GS QKD 014](https://www.etsi.org/deliver/etsi_gs/QKD/001_099/014/)). There is one KME per site.
-- An **SAE** (Secure Application Entity) is any application that asks a KME for keys. It has an **SAE ID** such as `SAE-A`. Each encryptor appliance is one SAE.
+- An **SAE** (Secure Application Entity) is any application that asks a KME for keys. It has an **SAE ID** such as `SAE-A`. Each encryptor appliance is one SAE, and its key-handling software is `qkd-exchange`.
 - The **encryptor** (this project) is a node that fetches keys from its KME and feeds them to the tools that protect traffic: strongSwan (IPsec), the Linux kernel (MACsec) and an SSH key generator.
 
 ```mermaid
@@ -44,7 +44,7 @@ In the lab there are no QKD systems: a **KME simulator** hands out random keys a
 | QKD system | Generates identical keys at both sites | quantum link plus a classical channel, vendor specific | at the site, not in this project |
 | KME | Stores QKD keys and gives them out by key ID | ETSI 014 REST over HTTPS, mTLS, port 8443 | at the site; in the lab a simulator on the appliance |
 | KME to KME channel | Lets the two KMEs hold the same key | vendor specific; in the lab a simulated link on `ens6` | between the KMEs |
-| `qkd-exchange` | Our KME client. Fetches keys, agrees them with the peer, hands them to the tools below, rotates them | ETSI 014 to the KME, peer API to the other appliance | container in the encryptor pod |
+| `qkd-exchange` | The encryptor's key manager, the software of the SAE: KME client, peer API, key distribution and rotation. Fetches keys from the KME, agrees them with the peer, hands them to the tools below, rotates them | ETSI 014 to the KME, peer API to the other appliance | container in the encryptor pod |
 | Peer API | How the master tells the slave which key to use (stage, then commit) | HTTPS with mTLS, port 8444 on `ens5` | inside `qkd-exchange` |
 | strongSwan | IPsec: builds the encrypted tunnel | IKEv2, ESP, UDP 500 and 4500 | container `strongswan` |
 | `ip macsec` | MACsec: encrypts Ethernet frames on a NIC (kernel feature) | IEEE 802.1AE, EtherType `0x88e5` | container `macsec`, kernel module on the host |

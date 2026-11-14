@@ -4,6 +4,8 @@
 
 QKD-keyed encryptor appliance (IPsec, MACsec, SSH) for a single k3s node. It is one `encryptor.yaml` for a k3s node, plus an Equinix Day 0 template that creates the site-specific Secret and ConfigMap. It has not been deployed on a device or tested against a real KME. The pieces were tested in Docker (section 4).
 
+New to QKD, KME or SAE? Start with [how it works](docs/how-it-works.md): the acronyms, and a diagram per use case (IPsec, MACsec, SSH, mTLS).
+
 ## 1. Stack
 
 | Role | Component |

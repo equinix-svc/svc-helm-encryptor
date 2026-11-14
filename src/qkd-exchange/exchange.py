@@ -443,7 +443,7 @@ class Console:
                "peer_sae": next(iter(ex.cons.values()))["peer_sae"], "consumers": mine,
                "ipsec": parse_ipsec(read_state(self.cfg.get("ipsec_file", "/state/ipsec.txt"))),
                "macsec": parse_macsec(read_state(self.cfg.get("macsec_file", "/state/macsec.txt"))),
-               "latency_ms": self.latency(), "addr": ex.cfg["peer"].get("bind"), "kme_ms": ex.kme_ms, "kme_sim": bool(ex.cfg["kme"].get("sim")), "laptop": ex.laptop, "ssh": ssh_info(next((c["dir"] for c in ex.cons.values() if c["type"] == "ssh"), "/ssh")), "link": dict(self.state), "peer": None}
+               "latency_ms": self.latency(), "addr": ex.cfg["peer"].get("bind"), "kme_ms": ex.kme_ms, "kme_sim": bool(ex.cfg["kme"].get("sim")), "laptop": ex.laptop, "ssh": ssh_info(next((os.path.join(c.get("dir", "/ssh"), c["name"]) for c in ex.cons.values() if c["type"] == "ssh"), "/ssh/ssh")), "link": dict(self.state), "peer": None}
         if self.state["linked"]:
             try:
                 out["peer"] = ex.peer_get("/v1/status")

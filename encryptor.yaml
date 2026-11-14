@@ -1,7 +1,7 @@
 # QKD-keyed encryptor appliance for a single k3s node. Source template: scripts/build.py turns it into encryptor.yaml.
 # One Pod (hostNetwork) with three consumers of ETSI GS QKD 014 keys, fed by qkd-exchange:
 #   strongswan : IPsec IKEv2 tunnels, QKD key injected as RFC 8784 PPK
-#   macsec     : MACsec (IEEE 802.1AE) on a host NIC, QKD key as MKA CAK (wpa_supplicant)
+#   macsec     : MACsec (IEEE 802.1AE) on a host NIC with static keys: the QKD key is the SAK (no MKA)
 #   qkd-exchange  : KME client + peer API; also rotates SSH key pairs (written under /var/lib/encryptor/ssh)
 # Site-specific Secret/ConfigMap (site, site-secrets) are NOT in this file: Day 0 creates them. The KME client
 # certificates (Secret kme-tls) are loaded after boot, never through Day 0 (see README.md).
@@ -49,6 +49,7 @@ spec:
             - { name: kme-tls, mountPath: /etc/qkd/tls, readOnly: true }
             - { name: console-auth, mountPath: /etc/qkd/auth, readOnly: true }
             - { name: swanctl-conf-d, mountPath: /swanctl/conf.d }
+            - { name: site, mountPath: /etc/macsec/macsec.env, subPath: macsec.env, readOnly: true }
             - { name: macsec, mountPath: /macsec }
             - { name: ssh, mountPath: /ssh }
             - { name: runstate, mountPath: /state, readOnly: true }

@@ -61,16 +61,37 @@ def apply_ipsec(c, key, key_id, extra):
     atomic_write(os.path.join(c.get("dir", "/swanctl/conf.d"), "10-ppk-%s.conf" % c["name"]), conf)
 
 
+def macsec_iface():
+    """MACSEC_IFACE from the macsec container's settings (empty: MACsec is not configured on this node)."""
+    try:
+        for line in open("/etc/macsec/macsec.env"):
+            if line.startswith("MACSEC_IFACE="):
+                return line.split("=", 1)[1].strip().strip("'\"")
+    except OSError:
+        pass
+    return ""
+
+
+def local_mac():
+    nic = macsec_iface()
+    try:
+        return open("/sys/class/net/%s/address" % nic).read().strip() if nic else None
+    except OSError:
+        return None
+
+
 def apply_macsec(c, key, key_id, extra):
-    """MACsec: the QKD key is the MKA CAK (128 or 256 bit), the key_ID (a UUID, 16 bytes) is the CKN. wpa_supplicant config."""
+    """MACsec with static keys, no MKA: the QKD key is the SAK itself and the key_ID (a UUID, 16 bytes) its identifier.
+    Writes shell variables for the macsec container: the key, its id, the association number (each new key goes on the next
+    of the four SAs) and the MAC address of the peer's NIC."""
     if len(key) not in (16, 32):
-        raise ValueError("MACsec CAK must be 128 or 256 bits, got %d" % (8 * len(key)))
-    ckn = key_id.replace("-", "")
-    prio = 16 if c["role"] == "master" else 64      # lowest priority value becomes MKA key server
-    conf = ("ctrl_interface=/run/wpa_supplicant\nap_scan=0\neapol_version=3\nnetwork={\n  key_mgmt=NONE\n  eapol_flags=0\n"
-            "  macsec_policy=1\n  macsec_csindex=%d\n  mka_cak=%s\n  mka_ckn=%s\n  mka_priority=%d\n}\n"
-            % (1 if len(key) == 32 else 0, key.hex(), ckn, prio))
-    atomic_write(os.path.join(c.get("dir", "/macsec"), "macsec.conf"), conf)
+        raise ValueError("MACsec key must be 128 or 256 bits, got %d" % (8 * len(key)))
+    peer = (extra.get("peer_mac") if c["role"] == "master" else extra.get("mac")) or ""
+    if not re.fullmatch(r"[0-9a-f]{2}(:[0-9a-f]{2}){5}", peer):
+        peer = ""
+    conf = ("KEY=%s\nKEY_ID=%s\nAN=%d\nCIPHER=%s\nPEER_MAC=%s\n"
+            % (key.hex(), key_id.replace("-", ""), int(extra.get("an", 0)) % 4, "gcm-aes-256" if len(key) == 32 else "gcm-aes-128", peer))
+    atomic_write(os.path.join(c.get("dir", "/macsec"), "key.env"), conf)
 
 
 def _ssh_pub(priv):
@@ -184,8 +205,15 @@ class Exchange:
         k = self.kme.enc_keys(peer, size=c.get("key_size", 256))[0]
         key, key_id = base64.b64decode(k["key"]), k["key_ID"]
         extra = make_ssh_extra(c, key) if c["type"] == "ssh" else {}
+        if c["type"] == "macsec":
+            extra = {"mac": local_mac(), "an": seq % 4}
         self.peer_post("/v1/stage", {"consumer": name, "seq": seq, "key_id": key_id})
         self.peer_post("/v1/commit", {"consumer": name, "seq": seq, "extra": extra})
+        if c["type"] == "macsec":              # the slave's NIC address, for the receive side of the master
+            try:
+                extra = dict(extra, peer_mac=self.peer_get("/v1/status").get("macsec_mac"))
+            except Exception:  # noqa: BLE001 - not fatal: the container waits for it
+                pass
         apply(c, key, key_id, extra)
         self.state[name].update(seq=seq, last_ok=time.time(), last_error=None, key_id=key_id)
         log.info("%s: rotated seq=%d key_id=%s", name, seq, key_id)
@@ -261,7 +289,7 @@ class Exchange:
         log.info("%s: applied seq=%d key_id=%s", c["name"], b["seq"], key_id)
 
     def status(self):
-        return {"sae_id": self.cfg["sae_id"], "kme": self.cfg["kme"]["url"], "addr": self.cfg["peer"].get("bind"), "kme_ms": self.kme_ms, "kme_sim": bool(self.cfg["kme"].get("sim")), "laptop": self.laptop, "consumers": self.state}
+        return {"sae_id": self.cfg["sae_id"], "kme": self.cfg["kme"]["url"], "addr": self.cfg["peer"].get("bind"), "macsec_mac": local_mac(), "kme_ms": self.kme_ms, "kme_sim": bool(self.cfg["kme"].get("sim")), "laptop": self.laptop, "consumers": self.state}
 
 
 def make_server(addr, port, handler, what):
@@ -339,7 +367,10 @@ def parse_macsec(txt):
         return {"state": "unknown"}
     if not txt.strip():
         return {"state": "idle"}
-    return {"state": "up" if " UP" in txt or "UP " in txt else "down", "raw": txt.strip()[:600]}
+    if txt.startswith("waiting"):
+        return {"state": "waiting"}
+    m = re.search(r"^macsec\d+@\S+\s+(\S+)", txt, re.M)
+    return {"state": "up" if m and m.group(1) == "UP" else "down", "raw": txt.strip()[:900]}
 
 
 def ssh_info(directory):

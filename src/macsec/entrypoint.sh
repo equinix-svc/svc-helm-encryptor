@@ -1,28 +1,24 @@
 #!/bin/sh
-# MACsec (IEEE 802.1AE) with MKA (802.1X-2010) on a host NIC. The CAK/CKN come from /macsec/macsec.conf, written
-# by qkd-exchange from a QKD key. When the file changes, wpa_supplicant is reconfigured (new CAK = new MKA session).
+# MACsec (IEEE 802.1AE) on a host NIC with static keys: no MKA, no supplicant. qkd-exchange writes the QKD key and the peer's MAC
+# address to /macsec/key.env; the key is the SAK. When the file changes, the new key goes on the next association number.
 # Settings from /etc/macsec/macsec.env: MACSEC_IFACE (empty = idle), MACSEC_ADDR (optional CIDR on the macsec interface).
-set -eu
+# The kernel module must be loaded on the host (modprobe macsec): a container cannot load it.
+set -u
 [ -r /etc/macsec/macsec.env ] && . /etc/macsec/macsec.env
-CONF=/macsec/macsec.conf
-publish() { if [ -d /state ]; then ip -br link show type macsec 2>/dev/null > /state/macsec.tmp && mv /state/macsec.tmp /state/macsec.txt; fi; return 0; }
+. /usr/local/bin/apply.sh
+KEYENV=/macsec/key.env
+publish() { if [ -d /state ]; then { ip -br link show type macsec; ip macsec show 2>/dev/null; } > /state/macsec.tmp 2>/dev/null && mv /state/macsec.tmp /state/macsec.txt; fi; return 0; }
 [ -n "${MACSEC_IFACE:-}" ] || { echo "MACSEC_IFACE not set: idle"; while true; do publish; sleep 10; done; }
-until [ -s "$CONF" ]; do echo "waiting for $CONF (first QKD key)"; sleep 3; done
-ip link set "$MACSEC_IFACE" up 2>/dev/null || true       # the NIC must be up for the MKA session
-modprobe macsec 2>/dev/null || true
-wpa_supplicant -i "$MACSEC_IFACE" -D macsec_linux -c "$CONF" &
-PID=$!
-last="$(md5sum < "$CONF")"
-while kill -0 "$PID" 2>/dev/null; do
-  sleep 5
+echo "MACsec on $MACSEC_IFACE: waiting for the first QKD key"
+last=""
+while true; do
+  if [ -s "$KEYENV" ] && [ "$(md5sum < "$KEYENV")" != "$last" ]; then
+    . "$KEYENV"
+    if [ -z "${PEER_MAC:-}" ]; then echo "the peer's MAC address is not known yet"
+    elif apply_key; then last="$(md5sum < "$KEYENV")"; echo "MACsec key applied: association $AN, key id ${KEY_ID%????????????????????}..."
+    else echo "applying the MACsec key failed, retrying"; fi
+  fi
   publish
-  cur="$(md5sum < "$CONF")"
-  if [ "$cur" != "$last" ]; then
-    wpa_cli -p /run/wpa_supplicant -i "$MACSEC_IFACE" reconfigure >/dev/null && last="$cur" && echo "CAK changed, wpa_supplicant reconfigured"
-  fi
-  if [ -n "${MACSEC_ADDR:-}" ]; then
-    M="$(ip -br link show type macsec 2>/dev/null | awk '{print $1}' | head -1 | cut -d@ -f1)"
-    [ -n "$M" ] && ! ip -br addr show "$M" | grep -q "${MACSEC_ADDR%/*}" && ip addr add "$MACSEC_ADDR" dev "$M" && ip link set "$M" up && echo "address $MACSEC_ADDR on $M"
-  fi
+  [ -s /state/macsec.txt ] || echo "waiting for the first key" > /state/macsec.txt
+  sleep 5
 done
-wait "$PID"

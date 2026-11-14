@@ -4,6 +4,7 @@
 #   LOCAL_ADDR    ens5  encryptor to encryptor: IKE, peer API                  e.g. 172.16.0.11
 #   KME_ADDR      ens6  KME to KME channel (the lab simulators' QKD link)      e.g. 192.168.50.11
 #   LAPTOP_IP / LAPTOP_MASK  BASIC lab: a simulated laptop on a dummy interface laptop0
+#   MACSEC_IFACE  loads the host's macsec kernel module now and at every boot (a container cannot load it)
 # Portal interface N is the Linux NIC ens(N+2): interface2 = ens4 ... interface7 = ens9. ens3 (interface1) is the management NIC and
 # is not touched. NIC names can be overridden with NIC_LINK, NIC_KME. The NICs are addressed with a netplan file; the
 # dummy interface uses systemd-networkd files because this netplan has no dummy device.
@@ -22,6 +23,9 @@ if [ -n "${LAPTOP_IP:-}" ]; then
   mkdir -p "$NDIR"
   printf '[NetDev]\nName=laptop0\nKind=dummy\n' > "$NDIR/40-laptop0.netdev"
   printf '[Match]\nName=laptop0\n\n[Network]\nAddress=%s/%s\n' "$LAPTOP_IP" "${LAPTOP_MASK:-24}" > "$NDIR/40-laptop0.network"
+fi
+if [ -n "${MACSEC_IFACE:-}" ]; then
+  mkdir -p /etc/modules-load.d; echo macsec > /etc/modules-load.d/qkd-macsec.conf; modprobe macsec 2>/dev/null || echo "WARNING: the macsec kernel module is not available"
 fi
 [ -n "$y" ] || [ -n "${LAPTOP_IP:-}" ] || exit 0
 [ -n "${NO_APPLY:-}" ] && exit 0

@@ -177,7 +177,7 @@ $('#dlgSave').onclick = async () => { const labels = {}; NICS.forEach(n => { lab
 let openTech = ['ipsec', 'macsec', 'ssh'].includes(location.hash.slice(1)) ? location.hash.slice(1) : null;
 function techState(t) {
   if (t === 'ipsec') return S.ipsec.state === 'established' ? ['running', true] : [S.ipsec.state || 'down', false];
-  if (t === 'macsec') return S.macsec.state === 'up' ? ['running', true] : S.macsec.state === 'idle' ? ['idle: no interface set', false] : [S.macsec.state || 'down', false];
+  if (t === 'macsec') return S.macsec.state === 'up' ? ['running', true] : S.macsec.state === 'idle' ? ['idle: no interface set', false] : S.macsec.state === 'waiting' ? ['waiting for the first key', false] : [S.macsec.state || 'down', false];
   const c = S.consumers.find(x => x.type === 'ssh'); return c && c.last_ok ? ['keys rotated, not a tunnel', true] : ['waiting for the first key', false];
 }
 function chips() {
@@ -199,7 +199,7 @@ function detail() {
     pre(ip.raw); note('The QKD key is the PPK of the IKE authentication, which is required: no tunnel without it.');
   } else if (t === 'macsec') {
     pre(S.macsec.raw);
-    note(S.macsec.state === 'idle' ? 'No MACsec interface is configured (MACSEC_IFACE is empty), so nothing is running. The QKD key (CAK) is still rotated.' : 'The QKD key is the MACsec CAK; wpa_supplicant runs the MKA session.');
+    note(S.macsec.state === 'idle' ? 'No MACsec interface is configured (MACSEC_IFACE is empty), so nothing is running. The QKD key is still rotated.' : 'The QKD key is the MACsec key itself (static, no MKA). Each new key goes on the next of the four associations, then the old one is removed. Traffic on this NIC between the two appliances is encrypted at Layer 2.');
   } else {
     if (S.ssh) { add('Fingerprint', S.ssh.fp || '-'); pre(S.ssh.pub); }
     note('Rotates an Ed25519 key pair on the appliance. It is a key rotation, not a tunnel: wiring the key into sshd or a CA is up to you.');

@@ -352,6 +352,31 @@ def ssh_info(directory):
     return {"pub": pub[:140], "fp": fp}
 
 
+NIC_ROLES = (("ens4", "k3s"), ("ens5", "encryptor"), ("ens6", "KME"), ("ens7", "MACsec"))
+
+
+def nic_info(nic):
+    """What this node itself sees of a NIC: carrier and IPv4 address. It has no Fabric credentials and no ip tool."""
+    base = "/sys/class/net/" + nic
+    if not os.path.isdir(base):
+        return {"nic": nic, "present": False, "up": False, "addr": None}
+    try:
+        up = open(base + "/carrier").read().strip() == "1"      # reading it fails while the NIC is down administratively
+    except OSError:
+        up = False
+    addr = None
+    try:
+        import fcntl, struct
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sk:
+            req = struct.pack("256s", nic[:15].encode())
+            ip = socket.inet_ntoa(fcntl.ioctl(sk.fileno(), 0x8915, req)[20:24])        # SIOCGIFADDR
+            mask = socket.inet_ntoa(fcntl.ioctl(sk.fileno(), 0x891b, req)[20:24])      # SIOCGIFNETMASK
+        addr = "%s/%d" % (ip, bin(struct.unpack(">I", socket.inet_aton(mask))[0]).count("1"))
+    except OSError:
+        pass
+    return {"nic": nic, "present": True, "up": up, "addr": addr}
+
+
 def tcp_latency_ms(host, port, n=3):
     """Median TCP connect time to the peer API: a latency figure that needs no ping binary or root."""
     vals = []
@@ -412,7 +437,8 @@ class Console:
         self.ex, self.cfg = ex, ex.cfg.get("console", {})
         self.persist = self.cfg.get("persist", "/persist/console.json")
         self.web = self.cfg.get("web", "/app/console")
-        self.state = {"linked": False, "fabric": ""}
+        self.state = {"linked": False, "fabric": "", "labels": {}}
+        self._kme_peer = None
         try:
             self.state.update(json.load(open(self.persist)))
         except (OSError, ValueError):
@@ -434,7 +460,27 @@ class Console:
         """Peer API latency, measured in the background: the status call returns at once even when the peer is down."""
         while True:
             self._lat = (time.time(), tcp_latency_ms(self.peer_host, self.peer_port))
+            try:                                  # the other appliance's KME, over the KME channel
+                u = urllib.parse.urlparse(self.ex.peer_get("/v1/status", timeout=3)["kme"])
+                self._kme_peer = tcp_latency_ms(u.hostname, u.port or 80)
+            except Exception:  # noqa: BLE001 - peer down
+                self._kme_peer = None
             time.sleep(5)
+
+    def nics(self):
+        out = []
+        for nic, role in NIC_ROLES:
+            i = nic_info(nic); i["role"] = role
+            i["ms"] = self.latency() if nic == "ens5" else self._kme_peer if nic == "ens6" else None
+            out.append(i)
+        return out
+
+    def labels(self, body):
+        """Names of the Fabric device link groups, typed by the user and only displayed."""
+        keys = {n for n, _ in NIC_ROLES}
+        self.state["labels"] = {k: str(v)[:80] for k, v in (body.get("labels") or {}).items() if k in keys and str(v).strip()}
+        self.save()
+        return 200, {"ok": True}
 
     def status(self):
         ex = self.ex
@@ -443,7 +489,7 @@ class Console:
                "peer_sae": next(iter(ex.cons.values()))["peer_sae"], "consumers": mine,
                "ipsec": parse_ipsec(read_state(self.cfg.get("ipsec_file", "/state/ipsec.txt"))),
                "macsec": parse_macsec(read_state(self.cfg.get("macsec_file", "/state/macsec.txt"))),
-               "latency_ms": self.latency(), "addr": ex.cfg["peer"].get("bind"), "kme_ms": ex.kme_ms, "kme_sim": bool(ex.cfg["kme"].get("sim")), "laptop": ex.laptop, "ssh": ssh_info(next((os.path.join(c.get("dir", "/ssh"), c["name"]) for c in ex.cons.values() if c["type"] == "ssh"), "/ssh/ssh")), "link": dict(self.state), "peer": None}
+               "latency_ms": self.latency(), "addr": ex.cfg["peer"].get("bind"), "kme_ms": ex.kme_ms, "kme_sim": bool(ex.cfg["kme"].get("sim")), "laptop": ex.laptop, "nics": self.nics(), "labels": dict(self.state.get("labels") or {}), "ssh": ssh_info(next((os.path.join(c.get("dir", "/ssh"), c["name"]) for c in ex.cons.values() if c["type"] == "ssh"), "/ssh/ssh")), "link": dict(self.state), "peer": None}
         if self.state["linked"]:
             try:
                 out["peer"] = ex.peer_get("/v1/status")
@@ -528,7 +574,7 @@ def serve_console(con):
                 return self._send(403, {"error": "missing X-Console header"})
             try:
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
-                fn = {"/api/link": lambda: con.link(body), "/api/unlink": con.unlink, "/api/test": lambda: con.test(body), "/api/rotate": con.rotate_now}.get(self.path)
+                fn = {"/api/link": lambda: con.link(body), "/api/labels": lambda: con.labels(body), "/api/unlink": con.unlink, "/api/test": lambda: con.test(body), "/api/rotate": con.rotate_now}.get(self.path)
                 if not fn:
                     return self._send(404, {"error": "not found"})
                 code, out = fn()

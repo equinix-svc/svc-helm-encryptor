@@ -70,6 +70,10 @@
   .laptop rect { fill:#2f3136; stroke:#b9bcc2; stroke-width:1.5; } .laptop.off rect { stroke:#55575c; stroke-dasharray:6 5; } .laptop text.t { fill:#fff; font-size:15px; font-weight:500; } .laptop text.s { fill:#a4a6ab; font-size:12px; } .laptop.off text.t, .laptop.off text.s { fill:#6f7176; }
   .laptop text.ok { fill:var(--green); } .laptop text.bad { fill:#ff8f9a; }
   .lan { stroke:#8a8d93; stroke-width:2; fill:none; } .lan.off { stroke:#55575c; stroke-dasharray:3 7; }
+  .conn { margin:12px 0 0 32px; font-size:12px; } .conn .crow { display:grid; grid-template-columns:12px 38px 1fr auto; gap:4px 8px; align-items:baseline; padding:4px 0; border-top:1px solid #3d3f44; }
+  .conn .crow:first-child { border-top:0; } .conn .role { color:var(--side-text); } .conn .ad { color:var(--side-dim); text-align:right; } .conn .lb { grid-column:2 / -1; color:var(--side-dim); font-size:11px; }
+  .conn .cd { width:9px; height:9px; border-radius:50%; background:#6f7176; align-self:center; } .conn .cd.ok { background:var(--green); } .conn .cd.bad { background:var(--red); }
+  details.dlg { margin:10px 0 0 32px; font-size:12px; color:var(--side-dim); } details.dlg summary { cursor:pointer; } details.dlg .field { margin:8px 0 0 0; } details.dlg .btn { margin-left:0; width:100%; }
   .qlink { stroke:#8a8d93; stroke-width:2; stroke-dasharray:2 6; fill:none; } svg text.lbl { fill:#c9c6cf; font-size:12px; }
   .linkbox rect { fill:#1f2023; stroke:#55575c; } .linkbox text { fill:#e8e8e8; font-size:12px; } .linkbox text.h { fill:var(--cyan); font-weight:600; }
   .table { margin:6px 24px 24px; background:var(--row); color:var(--row-text); max-width:900px; }
@@ -111,13 +115,17 @@
     <div class="card">
       <h2>Link the slave</h2>
       <div class="field"><label for="peer">Peer address (from the portal parameter PEER_ADDR)</label><input id="peer" readonly></div>
-      <div class="field"><label for="fabric">Fabric connection (label, e.g. fred-vc-paris-lyon)</label><input id="fabric" placeholder="optional label"></div>
+      <div class="conn" id="conn"></div>
+      <details class="dlg"><summary>Device link group names</summary>
+        <div class="field" id="dlgFields"></div>
+        <button class="btn" id="dlgSave" type="button">Save names</button>
+      </details>
       <button class="btn" id="testBtn" type="button">Test the slave side</button>
       <div class="testout" id="testOut" hidden></div>
       <button class="btn red" id="linkBtn" type="button">Link slave</button>
       <button class="btn" id="unlinkBtn" type="button" hidden>Unlink</button>
       <div class="msg" id="linkMsg"></div>
-      <div class="kv" style="margin-top:12px">The Fabric label is only stored and displayed: this node has no Fabric credentials, so it does not read the connection's real state. "Test the slave side" checks that the slave answers over the connection: TCP to its peer API (loss, latency) and the API call itself.</div>
+      <div class="kv" style="margin-top:12px">The console cannot read the Fabric connections (no Fabric credentials). Each line is what this node sees: the NIC carrier, its address and how long the other side takes to answer. The names are only stored and displayed. "Test the slave side" checks the peer API over the encryptor link: TCP loss and latency, then the API call itself.</div>
     </div>
   </aside>
 
@@ -147,6 +155,25 @@ function node(g, x, y, title, sub, tags, off) {
   tags.forEach((t, i) => { const tx = x + 18 + i * 66; n.append(el('rect', {x: tx, y: y + 84, width: 58, height: 22, rx: 2, class: 'tag'}), el('text', {x: tx + 29, y: y + 99, 'text-anchor': 'middle', class: 'tagt'}, t)); });
   g.append(n);
 }
+const NICS = ['ens4', 'ens5', 'ens6', 'ens7'];
+(function () { const f = $('#dlgFields'); NICS.forEach(n => { const l = document.createElement('label'); l.textContent = n; l.setAttribute('for', 'dlg-' + n); const i = document.createElement('input'); i.id = 'dlg-' + n; i.placeholder = 'device link group name'; f.append(l, i); }); })();
+function connectivity() {
+  const box = $('#conn'); box.replaceChildren();
+  (S.nics || []).forEach(n => {
+    const r = document.createElement('div'); r.className = 'crow';
+    const d = document.createElement('span'); d.className = 'cd ' + (!n.present || !n.addr ? '' : n.up ? 'ok' : 'bad');
+    const nm = document.createElement('b'); nm.textContent = n.nic;
+    const role = document.createElement('span'); role.className = 'role'; role.textContent = n.role;
+    const ad = document.createElement('span'); ad.className = 'ad';
+    const st = !n.present ? 'no such NIC' : !n.addr ? 'no address' : n.addr + (n.up ? (n.ms != null ? ' \u00b7 ' + n.ms + ' ms' : '') : ' \u00b7 no carrier');
+    ad.textContent = st; r.append(d, nm, role, ad);
+    const lab = (S.labels || {})[n.nic]; if (lab) { const l = document.createElement('div'); l.className = 'lb'; l.textContent = lab; r.append(l); }
+    box.append(r);
+    const inp = $('#dlg-' + n.nic); if (inp && document.activeElement !== inp && !inp.dataset.dirty) inp.value = lab || '';
+  });
+}
+NICS.forEach(n => { const i = $('#dlg-' + n); if (i) i.oninput = () => { i.dataset.dirty = '1'; }; });
+$('#dlgSave').onclick = async () => { const labels = {}; NICS.forEach(n => { labels[n] = $('#dlg-' + n).value.trim(); NICS.forEach(m => { delete $('#dlg-' + m).dataset.dirty; }); }); await post('api/labels', {labels}); load(); };
 let openTech = ['ipsec', 'macsec', 'ssh'].includes(location.hash.slice(1)) ? location.hash.slice(1) : null;
 function techState(t) {
   if (t === 'ipsec') return S.ipsec.state === 'established' ? ['running', true] : [S.ipsec.state || 'down', false];
@@ -253,24 +280,24 @@ function side() {
   $('#mLanRow').hidden = $('#sLanRow').hidden = !S.laptop;
   if (S.laptop) { $('#mLan').textContent = S.laptop.addr; $('#sLan').textContent = S.laptop.peer; }
   $('#mAddrRow').hidden = !S.addr; $('#mAddr').textContent = S.addr || '-'; $('#sAddr').textContent = S.peer_addr || '-';
-  $('#peer').value = S.peer_addr; if (document.activeElement !== $('#fabric')) $('#fabric').value = S.link.fabric || '';
+  $('#peer').value = S.peer_addr;
   const l = S.link.linked, sc = $('#slaveCard');
   sc.classList.toggle('off', !l); $('#slaveHint').textContent = l ? '' : '(not linked)';
   $('#sInfo').hidden = !(l && S.peer && S.peer.sae_id); if (l && S.peer && S.peer.sae_id) { $('#sSae').textContent = S.peer.sae_id; $('#sKme').textContent = (S.peer.kme || '-') + (S.peer.kme_ms != null ? ' \u00b7 ' + S.peer.kme_ms + ' ms' : ' \u00b7 unreachable'); }
-  $('#linkBtn').hidden = l; $('#unlinkBtn').hidden = !l; $('#fabric').readOnly = l;
+  $('#linkBtn').hidden = l; $('#unlinkBtn').hidden = !l;
   $('#rotate').disabled = !l || busy;
   const bad = l && (!S.peer || S.peer.error || S.ipsec.state !== 'established');
   $('#dot').className = 'dot ' + (!l ? 'warn' : bad ? 'bad' : 'ok'); $('#status').textContent = !l ? 'Slave not linked' : bad ? 'Degraded' : 'Linked';
 }
 async function load() {
-  try { const r = await fetch('api/status'); S = await r.json(); $('#clock').textContent = new Date().toLocaleTimeString(); side(); chips(); detail(); draw(); table(); }
+  try { const r = await fetch('api/status'); S = await r.json(); $('#clock').textContent = new Date().toLocaleTimeString(); side(); connectivity(); chips(); detail(); draw(); table(); }
   catch (e) { $('#dot').className = 'dot bad'; $('#status').textContent = 'Console unreachable'; }
 }
 async function post(path, body) {
   const r = await fetch(path, {method: 'POST', headers: H, body: JSON.stringify(body || {})}); const d = await r.json().catch(() => ({})); return [r.ok, d];
 }
 $('#linkBtn').onclick = async () => {
-  $('#linkMsg').textContent = 'Checking the peer...'; const [ok, d] = await post('api/link', {fabric: $('#fabric').value});
+  $('#linkMsg').textContent = 'Checking the peer...'; const [ok, d] = await post('api/link', {});
   $('#linkMsg').textContent = ok ? '' : (d.error || 'Link failed'); load();
 };
 $('#testBtn').onclick = async () => {

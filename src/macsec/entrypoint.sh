@@ -8,6 +8,7 @@ CONF=/macsec/macsec.conf
 publish() { if [ -d /state ]; then ip -br link show type macsec 2>/dev/null > /state/macsec.tmp && mv /state/macsec.tmp /state/macsec.txt; fi; return 0; }
 [ -n "${MACSEC_IFACE:-}" ] || { echo "MACSEC_IFACE not set: idle"; while true; do publish; sleep 10; done; }
 until [ -s "$CONF" ]; do echo "waiting for $CONF (first QKD key)"; sleep 3; done
+ip link set "$MACSEC_IFACE" up 2>/dev/null || true       # the NIC must be up for the MKA session
 modprobe macsec 2>/dev/null || true
 wpa_supplicant -i "$MACSEC_IFACE" -D macsec_linux -c "$CONF" &
 PID=$!

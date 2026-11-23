@@ -3,7 +3,7 @@
 # Placeholders: Equinix inline syntax, case-sensitive.   Equinix: hostname userName publicKey adminPwd ipAddressWithCidr gateway
 # Required: SAE_ID PEER_SAE_ID QKD_ROLE (master|slave) PEER_ADDR IKE_PSK REGISTRY_USER REGISTRY_TOKEN; master also FQDN ADMIN_EMAIL.
 # Optional: KME_URL (https:// = mutual TLS, certificates loaded AFTER boot; empty = a lab KME simulator on each appliance, linked by a
-#   simulated QKD link) LOCAL_ADDR (ens5, encryptor link) KME_ADDR KME_PEER_ADDR (ens6, KME channel)
+#   simulated QKD link) LOCAL_ADDR (ens5, encryptor link) KME_ADDR (ens6, KME channel)
 #   LOCAL_TS REMOTE_TS MACSEC_IFACE MACSEC_ADDR ADMIN_PASSWORD K3S_ROLE K3S_SERVER_URL K3S_TOKEN K3S_TLS_SAN K3S_PRIVATE_IFACE K3S_PRIVATE_IP_CIDR (ens4 private path, default 10.250.<3rd>.<4th>/16 from the public IP; "none" turns it off). Meaning and examples: README.
 # Installed on a single node or the first server, once k3s is Ready. Equinix injects a STATIC address, so this file configures the network.
 
@@ -64,7 +64,6 @@ write_files:
       MACSEC_ADDR='[(${MACSEC_ADDR})]'
       LOCAL_ADDR='[(${LOCAL_ADDR})]'
       KME_ADDR='[(${KME_ADDR})]'
-      KME_PEER_ADDR='[(${KME_PEER_ADDR})]'
       K3S_PRIVATE_IFACE='[(${K3S_PRIVATE_IFACE})]'
       K3S_PRIVATE_IP_CIDR='[(${K3S_PRIVATE_IP_CIDR})]'
       REGISTRY_USER='[(${REGISTRY_USER})]'
@@ -90,7 +89,9 @@ write_files:
       INSTALL_KME_SIM=no
       if [ -z "${KME_URL:-}" ]; then
         case "$QKD_ROLE" in master) D1=11; D2=12 ;; *) D1=12; D2=11 ;; esac
-        KME_ADDR="${KME_ADDR:-192.168.50.$D1}"; KME_PEER_ADDR="${KME_PEER_ADDR:-192.168.50.$D2}"   # ens6: KME channel
+        KME_ADDR="${KME_ADDR:-192.168.50.$D1}"   # ens6: KME channel
+        kme_peer() { printf '%s' "$1" | awk -F. -v d="$2" '{print $1"."$2"."$3"."$4+d}'; }   # the other side: next address on the master, previous on the slave
+        case "$QKD_ROLE" in master) KME_PEER_ADDR=$(kme_peer "$KME_ADDR" 1) ;; *) KME_PEER_ADDR=$(kme_peer "$KME_ADDR" -1) ;; esac
         KME_URL="http://$KME_ADDR:8443"; INSTALL_KME_SIM=yes
       fi
       if [ "$QKD_ROLE" = master ]; then
@@ -361,7 +362,7 @@ write_files:
       if [ "$UNIT" = k3s ] && [ -z "$K3S_SERVER_URL" ]; then
         echo "installing the encryptor stack"
         SAE_ID="$SAE_ID" PEER_SAE_ID="$PEER_SAE_ID" QKD_ROLE="$QKD_ROLE" KME_URL="$KME_URL" PEER_ADDR="$PEER_ADDR" \
-        IKE_PSK="$IKE_PSK" LOCAL_ADDR="$LOCAL_ADDR" KME_ADDR="$KME_ADDR" KME_PEER_ADDR="$KME_PEER_ADDR" REGISTRY_USER="$REGISTRY_USER" REGISTRY_TOKEN="$REGISTRY_TOKEN" \
+        IKE_PSK="$IKE_PSK" LOCAL_ADDR="$LOCAL_ADDR" KME_ADDR="$KME_ADDR" REGISTRY_USER="$REGISTRY_USER" REGISTRY_TOKEN="$REGISTRY_TOKEN" \
         FQDN="$FQDN" ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" \
         LOCAL_TS="$LOCAL_TS" REMOTE_TS="$REMOTE_TS" MACSEC_IFACE="$MACSEC_IFACE" MACSEC_ADDR="$MACSEC_ADDR" \
         /usr/local/bin/day0-encryptor.sh \

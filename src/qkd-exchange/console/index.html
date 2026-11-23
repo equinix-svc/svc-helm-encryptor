@@ -198,7 +198,14 @@ function detail() {
     if (S.laptop) add('Protected subnets', S.laptop.local_ts + ' ↔ ' + S.laptop.remote_ts);
     pre(ip.raw); note('The QKD key is the PPK of the IKE authentication, which is required: no tunnel without it.');
   } else if (t === 'macsec') {
-    pre(S.macsec.raw);
+    const m = S.macsec;
+    if (m.sci) {
+      add('Interface', 'macsec0 on ' + (m.nic || '-') + (m.mac ? ' · ' + m.mac : '')); add('Cipher', m.cipher || '-');
+      add('Sending on', 'association ' + m.tx_an);
+      add('Encrypted out', m.tx_pkts + ' packets · ' + m.tx_bytes + ' bytes'); add('Decrypted in', m.rx_pkts + ' packets · ' + m.rx_bytes + ' bytes');
+      if (m.rx_bad) add('Rejected', m.rx_bad + ' packets');
+      m.sas.forEach(s => add((s.dir === 'tx' ? 'Send' : 'Receive') + ' association ' + s.an, 'key ' + s.key_id + '... · packet number ' + s.pn + (s.on ? '' : ' · off')));
+    }
     note(S.macsec.state === 'idle' ? 'No MACsec interface is configured (MACSEC_IFACE is empty), so nothing is running. The QKD key is still rotated.' : 'The QKD key is the MACsec key itself (static, no MKA). Each new key goes on the next of the four associations, then the old one is removed. Traffic on this NIC between the two appliances is encrypted at Layer 2.');
   } else {
     if (S.ssh) { add('Fingerprint', S.ssh.fp || '-'); pre(S.ssh.pub); }

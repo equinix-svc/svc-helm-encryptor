@@ -7,7 +7,7 @@ set -u
 [ -r /etc/macsec/macsec.env ] && . /etc/macsec/macsec.env
 . /usr/local/bin/apply.sh
 KEYENV=/macsec/key.env
-publish() { if [ -d /state ]; then { ip -br link show type macsec; ip macsec show 2>/dev/null; } > /state/macsec.tmp 2>/dev/null && mv /state/macsec.tmp /state/macsec.txt; fi; return 0; }
+publish() { if [ -d /state ]; then { ip -br link show type macsec; ip -s macsec show 2>/dev/null; } > /state/macsec.tmp 2>/dev/null && mv /state/macsec.tmp /state/macsec.txt; fi; return 0; }
 [ -n "${MACSEC_IFACE:-}" ] || { echo "MACSEC_IFACE not set: idle"; while true; do publish; sleep 10; done; }
 echo "MACsec on $MACSEC_IFACE: waiting for the first QKD key"
 last=""

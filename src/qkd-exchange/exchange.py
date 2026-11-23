@@ -369,8 +369,33 @@ def parse_macsec(txt):
         return {"state": "idle"}
     if txt.startswith("waiting"):
         return {"state": "waiting"}
-    m = re.search(r"^macsec\d+@\S+\s+(\S+)", txt, re.M)
-    return {"state": "up" if m and m.group(1) == "UP" else "down", "raw": txt.strip()[:900]}
+    m = re.search(r"^macsec\d+@(\S+)\s+(\S+)\s+(\S+)", txt, re.M)
+    out = {"state": "up" if m and m.group(2) == "UP" else "down", "nic": m.group(1) if m else None, "mac": m.group(3) if m else None}
+    m = re.search(r"cipher suite: (\S+)", txt)
+    out["cipher"] = m.group(1).rstrip(",") if m else None
+    m = re.search(r"TXSC: (\w+) on SA (\d)", txt)
+    out["sci"], out["tx_an"] = (m.group(1), int(m.group(2))) if m else (None, None)
+    # per-direction SAs ("1: PN 10, state on, key <id>"); the stats lines before the first SA of a side are the channel totals
+    sas, side, insa, stats = [], None, False, {"tx": {}, "rx": {}}
+    lines = txt.splitlines()
+    for i, ln in enumerate(lines):
+        if "TXSC:" in ln or "RXSC:" in ln:
+            side, insa = ("tx" if "TXSC:" in ln else "rx"), False
+            continue
+        m = re.match(r"\s+(\d): PN (\d+), state (\w+), key (\w+)", ln)
+        if m and side:
+            insa = True
+            sas.append({"dir": side, "an": int(m.group(1)), "pn": int(m.group(2)), "on": m.group(3) == "on", "key_id": m.group(4)[:8]})
+        elif ln.strip().startswith("stats:") and side and not insa and i + 1 < len(lines):
+            names, vals = ln.split(":", 1)[1].split(), lines[i + 1].split()
+            stats[side].update({n: int(v) for n, v in zip(names, vals) if v.isdigit()})
+    out["sas"] = sas
+    out["tx_pkts"] = stats["tx"].get("OutPktsEncrypted", 0) + stats["tx"].get("OutPktsProtected", 0)
+    out["rx_pkts"] = stats["rx"].get("InPktsOK", 0)
+    out["rx_bad"] = sum(stats["rx"].get(k, 0) for k in ("InPktsInvalid", "InPktsNotValid"))
+    out["tx_bytes"] = stats["tx"].get("OutOctetsEncrypted", 0) + stats["tx"].get("OutOctetsProtected", 0)
+    out["rx_bytes"] = stats["rx"].get("InOctetsDecrypted", 0) + stats["rx"].get("InOctetsValidated", 0)
+    return out
 
 
 def ssh_info(directory):

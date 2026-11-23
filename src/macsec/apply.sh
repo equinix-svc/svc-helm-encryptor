@@ -4,6 +4,8 @@
 IF="${MACSEC_LINK:-macsec0}"
 apply_key() {
   ip link set "$MACSEC_IFACE" up || return 1
+  # after a restart the sequence (hence AN) starts again while the kernel still sends on that association, which cannot be replaced: rebuild the link
+  if ip macsec show "$IF" 2>/dev/null | grep -q "TXSC: .* on SA $AN\$"; then ip link del "$IF" 2>/dev/null; fi
   if ! ip link show "$IF" >/dev/null 2>&1; then
     ip link add link "$MACSEC_IFACE" name "$IF" type macsec port 1 encrypt on cipher "$CIPHER" || return 1
   fi

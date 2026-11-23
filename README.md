@@ -35,7 +35,7 @@ One master/slave pair rotates keys. The master requests keys from its KME, sends
 | 3. Day 0 file | [`day0/day0-encryptor-basic.yaml`](day0/day0-encryptor-basic.yaml) for a first test, [`day0/day0-encryptor-advanced.yaml`](day0/day0-encryptor-advanced.yaml) for a real KME. |
 | 4. Parameters | Four required for BASIC, plus `FQDN` and `ADMIN_EMAIL` on the master, see below. Full list: [Day 0 templates](#3-day-0-templates). Certificates for a real KME are loaded after boot: [section 4](#4-load-kme-certificates-after-boot). |
 | 5. Check | On the node: `curl -fsSL https://raw.githubusercontent.com/equinix-svc/svc-helm-encryptor/main/scripts/check-install.sh \| sudo bash`. It is read-only, prints PASS/FAIL and never prints secrets. |
-| Login banner | Shown on each interactive SSH login: role, peer, KME, live status (pods, IPsec SA, last key), the JSON status endpoints (peer API, KME simulator on the BASIC master) and tips. Installed by Day 0 from `scripts/motd.sh` into `/etc/profile.d/`; never shows a secret. On an existing node: `sudo curl -fsSL https://raw.githubusercontent.com/equinix-svc/svc-helm-encryptor/main/scripts/motd.sh -o /etc/profile.d/qkd-encryptor-motd.sh` |
+| Login banner | Shown on each interactive SSH login: role, peer, KME, live status (pods, IPsec SA, last key), the JSON status endpoints (peer API, KME simulator) and tips. Installed by Day 0 from `scripts/motd.sh` into `/etc/profile.d/`; never shows a secret. On an existing node: `sudo curl -fsSL https://raw.githubusercontent.com/equinix-svc/svc-helm-encryptor/main/scripts/motd.sh -o /etc/profile.d/qkd-encryptor-motd.sh` |
 
 ## 3. Day 0 templates
 
@@ -43,7 +43,7 @@ Two templates, same structure. Both do what the k3s-node image's own Day 0 does,
 
 | Template | Use | Required parameters |
 |---|---|---|
-| [`day0/day0-encryptor-basic.yaml`](day0/day0-encryptor-basic.yaml) | **BASIC** (lab): bring up a pair quickly with the KME simulator, fixed addresses on the lab links | 4, plus 2 on the master, the rest optional |
+| [`day0/day0-encryptor-basic.yaml`](day0/day0-encryptor-basic.yaml) | **BASIC** (lab): bring up a pair quickly with a KME simulator on each appliance, fixed addresses on the lab links | 4, plus 2 on the master, the rest optional |
 | [`day0/day0-encryptor-advanced.yaml`](day0/day0-encryptor-advanced.yaml) | **ADVANCED**: real KME, per-site values | 8, plus 2 on the master, the rest optional |
 
 Equinix predefined (both): `hostname` `userName` `publicKey` `adminPwd` `ipAddressWithCidr` `gateway`. Declare every other variable as a custom parameter in the portal.
@@ -54,7 +54,7 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 
 | Parameter | BASIC | ADVANCED | Default | Example (paste in the portal) | Meaning |
 |---|---|---|---|---|---|
-| `QKD_ROLE` | yes | yes | - | `master` | `master` (calls `enc_keys`, initiates IPsec) or `slave` (calls `dec_keys`). In BASIC, the master is SAE-A and also runs the KME simulator that both appliances use; the slave is SAE-B. |
+| `QKD_ROLE` | yes | yes | - | `master` | `master` (calls `enc_keys`, initiates IPsec) or `slave` (calls `dec_keys`). In BASIC, the master is SAE-A and the slave SAE-B. |
 | `PEER_ADDR` | no | yes | BASIC: `172.16.0.12` on the master, `.11` on the slave | `172.16.0.12` | The other appliance's address on the encryptor link (`ens5`), used for IKE and the peer API on 8444. Any address reachable from this appliance works, a private one included. With mutual TLS (ADVANCED) it must match a name or IP in the peer certificate. |
 | `SAE_ID` | - | yes | - | `SAE-A` | This appliance's SAE ID on its KME. BASIC fixes it to `SAE-A` (master) or `SAE-B` (slave). |
 | `PEER_SAE_ID` | - | yes | - | `SAE-B` | The remote appliance's SAE ID. BASIC fixes it to the opposite of the local one. |
@@ -94,7 +94,7 @@ A Network Edge device created with 5 interfaces has one Linux NIC per portal int
 | interface1 | `ens3` | management: SSH, Internet Access, the public console | public | - |
 | interface2 | `ens4` | k3s cluster exchange: API, etcd, kubelet, VXLAN | `10.250.0.0/16`, address derived from the public IP | `K3S_PRIVATE_IP_CIDR`, `K3S_PRIVATE_IFACE` |
 | interface3 | `ens5` | encryptor to encryptor: IKE, peer API (master to slave) | `172.16.0.0/24` | `LOCAL_ADDR`, `PEER_ADDR` |
-| interface4 | `ens6` | KME to KME channel: the lab simulators' QKD link, and the slave's route to the master's simulator in BASIC | `192.168.50.0/24` | `KME_ADDR` |
+| interface4 | `ens6` | KME to KME channel: the lab simulators' QKD link, and the appliance's route to its own KME | `192.168.50.0/24` | `KME_ADDR` |
 | interface5 | `ens7` | `MACSEC_IFACE`: a NIC dedicated to MACsec | none | - |
 
 The `172.16.0.0/24` subnet is the encryptor link only. In BASIC the three lab addresses are fixed by role (`.11` master, `.12` slave on `ens5` and `ens6`), so `PEER_ADDR` is not a portal parameter there and no public address is needed to configure the pair. The k3s private path is the same default as svc-helm-daihub: `ens4` gets `10.250.<3rd>.<4th>/16` built from the public IP, written by the Day 0 bootstrap before k3s starts. The encryptor link uses `172.16.0.0/24` and the KME channel `192.168.50.0/24` (`.11` on the master, `.12` on the slave in both). None of them overlaps the k3s pod and service ranges (`10.42.0.0/16`, `10.43.0.0/16`) or the BASIC laptop subnets (`10.1.0.0/24`, `10.2.0.0/24`). [`scripts/network.sh`](scripts/network.sh) writes the encryptor and KME addresses as a netplan file, and the dummy laptop interface as systemd-networkd files (this netplan has no dummy device). The portal lists each interface's MAC address (device details) and `ip -br link` shows it on the node, so the mapping can be checked.
@@ -143,7 +143,7 @@ The master serves a small web console: the appliance pair as two nodes joined by
 | Laptop simulators (BASIC) | Day 0 gives each appliance a dummy interface `laptop0` with a simulated laptop at `.10` of its protected subnet (`10.1.0.10` behind the master, `10.2.0.10` behind the slave), written as systemd-networkd files (the node's netplan has no dummy device). Each appliance runs an echo service on it and, every 5 seconds, sends a few exchanges from its laptop to the other one. Source and destination are inside the protected subnets, so they only get through the tunnel. The console draws both laptops above their appliances, each showing the answer time to the other laptop, and the link box shows the ESP packet counters |
 | IPsec, MACsec, SSH chips | the three chips of the master card show what is really running: lit when active, dim otherwise. Click one to see its parameters under it. IPsec: state, uptime, child SAs, ESP packet counters, protected subnets and the `swanctl` SA details (proposals, SPIs, rekey times). MACsec: idle until `MACSEC_IFACE` is set, otherwise the interface and its MAC, the cipher, the association in use, encrypted and decrypted packet and byte counters, rejected packets, and each send and receive association with its key ID and packet number. SSH: the fingerprint of the rotated public key (a key rotation, not a tunnel). Each one also shows its QKD key interval, sequence and last key |
 | Addresses | each Encryptor box shows its encryptor link address (`LOCAL_ADDR`, the `172.16.0.x` of `ens5`), and each KME box its own address on the KME channel (`KME_ADDR`, the `192.168.50.x` of `ens6`) |
-| KME links | each appliance is drawn with its KME and an ETSI 014 line showing the TCP connect time to it, red and dashed when it does not answer. The slave's figure comes from its own peer API status. In BASIC both appliances use the master's simulator, drawn once. In ADVANCED with an empty `KME_URL` each appliance has its own simulator and the dotted line between them is the simulated QKD link; with real KMEs the line is dotted and not monitored |
+| KME links | each appliance is drawn with its KME and an ETSI 014 line showing the TCP connect time to it, red and dashed when it does not answer. The slave's figure comes from its own peer API status. With a simulator (BASIC, and ADVANCED with an empty `KME_URL`) each appliance has its own and the dotted line between them is the simulated QKD link; with real KMEs the line is dotted and not monitored |
 | Link line | IPsec state and uptime, number of child SAs, latency, age of the last key |
 | Latency | median TCP connect time from the master to the peer API port (8444), measured every 5 seconds. It needs no ping tool or root |
 | IPsec and MACsec state | the `strongswan` and `macsec` containers publish them to a shared in-memory volume every 5 to 10 seconds; older than 40 seconds counts as unknown |

@@ -74,7 +74,7 @@ except Exception:
   [ "$role" = slave ] && printf '  %-15s %-38s %s\n' "Console" "none on a slave" "open the console on the master (${peeraddr})"
   [ "$role" = master ] && printf '  %-15s %-38s %s\n' "Console" "https://${fqdn:-<FQDN>}" "login: ADMIN_EMAIL, password in /etc/encryptor/credentials.env"
   [ -n "$scheme" ] && printf '  %-15s %-38s %s\n' "Peer API"   "$scheme://$ip:8444/v1/status" "JSON, key rotation state (mTLS in ADVANCED)"
-  [ -n "$sim" ] && [ -n "$peer" ] && printf '  %-15s %-38s %s\n' "KME simulator" "http://$ip:8443/api/v1/keys/$peer/status" "JSON, ETSI 014 status (lab, BASIC master)"
+  [ -n "$sim" ] && [ -n "$peer" ] && printf '  %-15s %-38s %s\n' "KME simulator" "http://$ip:8443/api/v1/keys/$peer/status" "JSON, ETSI 014 status (lab)"
   printf '\n  %sTIPS%s\n' "$B" "$N"
   printf '   • Tunnel:    sudo k3s kubectl -n encryptor exec deploy/encryptor -c strongswan -- swanctl --list-sas\n'
   printf '   • Keys:      sudo k3s kubectl -n encryptor logs deploy/encryptor -c qkd-exchange --tail=20\n'

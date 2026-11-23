@@ -1,5 +1,5 @@
 #cloud-config
-# BASIC Day 0 (lab) for the Network Edge profile "k3s-node": a pair of QKD encryptors with a KME simulator on the master (random keys,
+# BASIC Day 0 (lab) for the Network Edge profile "k3s-node": a pair of QKD encryptors, each with its own KME simulator linked to the other (random keys,
 # NOT QKD, plain HTTP: restrict TCP 8443 and 8444 to the peer), SAE-A master and SAE-B slave, and a simulated laptop on each side.
 # Placeholders: Equinix inline syntax, case-sensitive.   Equinix: hostname userName publicKey adminPwd ipAddressWithCidr gateway
 # Required: QKD_ROLE (master|slave) IKE_PSK PEER_ADDR REGISTRY_USER REGISTRY_TOKEN; master also FQDN ADMIN_EMAIL (ADMIN_PASSWORD generated).
@@ -89,17 +89,15 @@ write_files:
         done
         FQDN="$(printf '%s' "$FQDN" | tr 'A-Z' 'a-z')"
       fi
-      # BASIC defaults: fixed SAE IDs, the lab links on fixed private addresses (.11 master, .12 slave), KME simulator on the master
+      # BASIC defaults: fixed SAE IDs, the lab links on fixed private addresses (.11 master, .12 slave), a KME simulator on each appliance
       case "$QKD_ROLE" in master) D1=11; D2=12 ;; slave) D1=12; D2=11 ;; *) echo "QKD_ROLE must be master|slave"; exit 1 ;; esac
       LOCAL_ADDR="${LOCAL_ADDR:-172.16.0.$D1}"; PEER_ADDR="${PEER_ADDR:-172.16.0.$D2}"           # ens5: encryptor link
       KME_ADDR="${KME_ADDR:-192.168.50.$D1}"  # ens6: KME channel
       kme_peer() { printf '%s' "$1" | awk -F. -v d="$2" '{print $1"."$2"."$3"."$4+d}'; }   # the other side: next address on the master, previous on the slave
       case "$QKD_ROLE" in master) KME_PEER_ADDR=$(kme_peer "$KME_ADDR" 1) ;; *) KME_PEER_ADDR=$(kme_peer "$KME_ADDR" -1) ;; esac
-      INSTALL_KME_SIM=no
-      case "$QKD_ROLE" in
-        master) SAE_ID=SAE-A; PEER_SAE_ID=SAE-B; KME_URL="http://$KME_ADDR:8443"; INSTALL_KME_SIM=yes ;;
-        slave)  SAE_ID=SAE-B; PEER_SAE_ID=SAE-A; KME_URL="http://$KME_PEER_ADDR:8443" ;;
-      esac
+      # each appliance runs its own KME simulator, linked to the other one (simulated QKD link)
+      INSTALL_KME_SIM=yes; KME_URL="http://$KME_ADDR:8443"
+      case "$QKD_ROLE" in master) SAE_ID=SAE-A; PEER_SAE_ID=SAE-B ;; slave) SAE_ID=SAE-B; PEER_SAE_ID=SAE-A ;; esac
       NODE_IP="${LOCAL_ADDR:-$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')}"
       BIND=""; [ -n "${LOCAL_ADDR:-}" ] && BIND=',"bind":"'"$LOCAL_ADDR"'"'
       # the console listens on the pod-network gateway of this node (cni0, first address of the node's pod range), so only Traefik
@@ -128,7 +126,7 @@ write_files:
       INT=3600
       cat > "$W/config.json" <<EOF
       {"sae_id":"$SAE_ID",
-       "kme":{"url":"$KME_URL",$TLSJ},
+       "kme":{"url":"$KME_URL",$TLSJ,"sim":true},
        "peer":{"url":"$SCHEME://$PEER_ADDR:8444","listen":8444$BIND,$TLSJ},
        $CONSOLE
        $LAPTOP
@@ -200,9 +198,8 @@ write_files:
       }
       EXTRA=""; [ "${INSTALL_KME_SIM:-}" = yes ] && EXTRA=dev-kme-sim.yaml
       for f in encryptor.yaml $EXTRA; do fetch "$f"; done
-      # the lab KME simulator listens only on its KME channel address
-      SIMBIND="$KME_ADDR"
-      [ -n "$EXTRA" ] && sed -i 's#args: \[sim, --port, "8443"\]#args: [sim, --bind, "'"$SIMBIND"'", --port, "8443"]#' "$MAN/dev-kme-sim.yaml"
+      # the lab KME simulator listens only on its KME channel address and takes keys from the other one
+      sed -i "s#args: \[sim, --port, \"8443\"\]#args: [sim, --bind, \"$KME_ADDR\", --peer, \"http://$KME_PEER_ADDR:8443\", --port, \"8443\"]#" "$MAN/dev-kme-sim.yaml"
       # Login banner (best effort: never stops the install)
       curl -fsSL --retry 3 -H "Accept: application/vnd.github.raw" \
         "https://api.github.com/repos/equinix-svc/svc-helm-encryptor/contents/scripts/motd.sh" -o /etc/profile.d/qkd-encryptor-motd.sh \

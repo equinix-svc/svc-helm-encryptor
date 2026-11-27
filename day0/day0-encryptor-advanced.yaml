@@ -81,10 +81,10 @@ write_files:
         [ -n "${!v:-}" ] || { echo "missing required parameter $v"; exit 1; }
       done
       # no KME_URL: one lab simulator per appliance, linked
+      case "$QKD_ROLE" in master) D1=11 ;; *) D1=12 ;; esac
+      KME_ADDR="${KME_ADDR:-192.168.50.$D1}"   # ens6: KME channel, to a real KME or between the simulators
       INSTALL_KME_SIM=no
       if [ -z "${KME_URL:-}" ]; then
-        case "$QKD_ROLE" in master) D1=11; D2=12 ;; *) D1=12; D2=11 ;; esac
-        KME_ADDR="${KME_ADDR:-192.168.50.$D1}"   # ens6: KME channel
         kme_peer() { printf '%s' "$1" | awk -F. -v d="$2" '{print $1"."$2"."$3"."$4+d}'; }   # the other side: next address on the master, previous on the slave
         case "$QKD_ROLE" in master) KME_PEER_ADDR=$(kme_peer "$KME_ADDR" 1) ;; *) KME_PEER_ADDR=$(kme_peer "$KME_ADDR" -1) ;; esac
         KME_URL="http://$KME_ADDR:8443"; INSTALL_KME_SIM=yes

@@ -57,7 +57,7 @@ write_files:
       LOCAL_ADDR='[(${LOCAL_ADDR})]'
       KME_ADDR='[(${KME_ADDR})]'
       K3S_PRIVATE_IFACE=''
-      K3S_PRIVATE_IP_CIDR=''
+      K3S_LOCAL_ADDR=''
       REGISTRY_USER='[(${REGISTRY_USER})]'
       REGISTRY_TOKEN='[(${REGISTRY_TOKEN})]'
       FQDN='[(${FQDN})]'
@@ -275,7 +275,7 @@ write_files:
 
       # private path between nodes on ens4: 10.250.<3rd>.<4th>/16 from the public IP; k3s node-ip
       PRIV_IF="${K3S_PRIVATE_IFACE:-ens4}"; PRIV_IP=""
-      PRIV_CIDR="$K3S_PRIVATE_IP_CIDR"
+      PRIV_CIDR="$K3S_LOCAL_ADDR"
       if [ -z "$PRIV_CIDR" ] && [ -n "$NODE_IP" ]; then PRIV_CIDR="10.250.$(echo "$NODE_IP" | cut -d. -f3).$(echo "$NODE_IP" | cut -d. -f4)/16"; fi
       [ "$PRIV_CIDR" != none ] || PRIV_CIDR=""
       if [ -n "$PRIV_CIDR" ] && ! ip link show "$PRIV_IF" >/dev/null 2>&1; then echo "private path skipped: no interface $PRIV_IF"; PRIV_CIDR=""; fi
@@ -302,6 +302,7 @@ write_files:
         server)
           echo "write-kubeconfig-mode: \"0640\"" >> "$CFG"
           [ -n "$K3S_TLS_SAN" ] && printf 'tls-san:\n  - "%s"\n' "$K3S_TLS_SAN" >> "$CFG"
+          [ -z "$K3S_SERVER_URL" ] || [ -n "$K3S_TOKEN" ] || { echo "a server joining a cluster needs K3S_TOKEN"; exit 1; }
           if [ -n "$K3S_SERVER_URL" ]; then echo "server: \"$K3S_SERVER_URL\"" >> "$CFG"; else echo "cluster-init: true" >> "$CFG"; fi
           UNIT=k3s ;;
         agent)

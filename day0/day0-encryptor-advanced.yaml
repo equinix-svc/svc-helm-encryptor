@@ -1,5 +1,5 @@
 #cloud-config
-# ADVANCED Day 0, Network Edge profile "k3s-node": a QKD encryptor (IPsec, MACsec, SSH key rotation) with per-site values.
+# ADVANCED Day 0, Network Edge profile "k3s-node": a QKD encryptor (IPsec, MACsec, SSH key rotation) with per-site values; simulated laptops on the default subnets.
 # Equinix inline placeholders, case-sensitive. KME_URL empty = linked lab simulators; https:// = mutual TLS.
 # Required: QKD_ROLE IKE_PSK REGISTRY_USER REGISTRY_TOKEN; master also FQDN ADMIN_EMAIL. README.
 
@@ -101,7 +101,14 @@ write_files:
       SAE_ID="${SAE_ID:-$A}"; PEER_SAE_ID="${PEER_SAE_ID:-$B}"
       # protected subnets behind each appliance (traffic on a directly attached subnet stays outside the tunnel)
       case "$QKD_ROLE" in master) A=10.1.0.0/24; B=10.2.0.0/24 ;; *) A=10.2.0.0/24; B=10.1.0.0/24 ;; esac
+      LAB=""; [ -n "${LOCAL_TS:-}${REMOTE_TS:-}" ] || LAB=yes   # laptops only with the default subnets: never shadow a real one
       LOCAL_TS="${LOCAL_TS:-$A}"; REMOTE_TS="${REMOTE_TS:-$B}"
+      # simulated laptop at .10 of each protected subnet
+      LAPTOP_IP=""; PEER_LAPTOP_IP=""; LAPTOP_MASK=""
+      if [ -n "$LAB" ]; then
+        host10() { printf '%s' "${1%/*}" | awk -F. '{print $1"."$2"."$3".10"}'; }
+        LAPTOP_IP="$(host10 "$LOCAL_TS")"; PEER_LAPTOP_IP="$(host10 "$REMOTE_TS")"; LAPTOP_MASK="${LOCAL_TS#*/}"
+      fi
       # encryptor link on ens5: .11 master, .12 slave (set both for sites linked another way)
       case "$QKD_ROLE" in master) A=172.16.0.11; B=172.16.0.12 ;; *) A=172.16.0.12; B=172.16.0.11 ;; esac
       LOCAL_ADDR="${LOCAL_ADDR:-$A}"; PEER_ADDR="${PEER_ADDR:-$B}"
@@ -123,6 +130,7 @@ write_files:
         *)         SCHEME=http;  TLSJ='"ca":null'; echo "KME_URL is not https: KME and peer API use plain HTTP (lab only)" ;;
       esac
 
+      LAPTOP=""; [ -z "$LAB" ] || LAPTOP='"laptop":{"addr":"'"$LAPTOP_IP"'","peer":"'"$PEER_LAPTOP_IP"'","port":7,"local_ts":"'"$LOCAL_TS"'","remote_ts":"'"$REMOTE_TS"'"},'
       CONSOLE=""; [ "$QKD_ROLE" = master ] && CONSOLE='"console":{"bind":"'"$CONSOLE_IP"'","port":8080,"hosts":["'"$FQDN"'"],"auth_file":"/etc/qkd/auth/auth"},'
 
       # --- exchange config: three consumers, same role on all of them
@@ -132,6 +140,7 @@ write_files:
        "kme":{"url":"$KME_URL",$TLSJ$SIMJ},
        "peer":{"url":"$SCHEME://$PEER_ADDR:8444","listen":8444$BIND,$TLSJ},
        $CONSOLE
+       $LAPTOP
        "consumers":[
         {"name":"s2s","type":"ipsec","peer_sae":"$PEER_SAE_ID","role":"$QKD_ROLE","interval":$INT,"dir":"/swanctl/conf.d"},
         {"name":"macsec","type":"macsec","peer_sae":"$PEER_SAE_ID","role":"$QKD_ROLE","interval":86400,"dir":"/macsec"},

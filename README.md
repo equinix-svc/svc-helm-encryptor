@@ -54,6 +54,7 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 
 | Parameter | BASIC | ADVANCED | Default | Example (paste in the portal) | Meaning |
 |---|---|---|---|---|---|
+| `ADMIN_PASSWORD` | no | no | generated | `ChangeMe-2026` | Master only. Console password. Written to `/etc/encryptor/credentials.env` (root only). |
 | `QKD_ROLE` | yes | yes | - | `master` | `master` (calls `enc_keys`, initiates IPsec) or `slave` (calls `dec_keys`). In BASIC, the master is SAE-A and the slave SAE-B. |
 | `IKE_PSK` | yes | yes | - | `4f9c2a7e1b8d3c6a5e0f9b2d7c4a1e83` | IKEv2 secret, identical on both ends, never stored in the repo. The IPsec tunnel is always configured, so both templates refuse to start without it. Generate with `openssl rand -hex 16`. |
 | `REGISTRY_USER` | yes | yes | - | `my-github-user` | GitHub login used to pull the private images from ghcr.io. Day 0 stops the encryptor install without it. |
@@ -68,15 +69,14 @@ The **BASIC** and **ADVANCED** columns show whether the parameter is required in
 | `KME_ADDR` | no | no | `192.168.50.11` on the master,<br>`192.168.50.12` on the slave | `192.168.50.11` | This appliance's address on `ens6`, the KME to KME channel. The lab KME simulator listens on it, and the appliance reaches its KME there. The other simulator's address is derived from it: the next address on the master, the previous one on the slave (`192.168.50.11` on the master, `192.168.50.12` on the slave by default). |
 | `LOCAL_TS` | no | no | `10.1.0.0/24` on the master,<br>`10.2.0.0/24` on the slave | `10.1.0.0/24` | Local protected subnet, behind this appliance: set it to your real one. A simulated laptop lives at `.10` of it (see Console); in ADVANCED only while `LOCAL_TS` and `REMOTE_TS` are both empty. Never `0.0.0.0/0` on a node you manage over its public address: it would send all the node's traffic, SSH included, into the tunnel. |
 | `REMOTE_TS` | no | no | `10.2.0.0/24` on the master,<br>`10.1.0.0/24` on the slave | `10.2.0.0/24` | Remote protected subnet. Same warning. |
-| `K3S_PRIVATE_IFACE` | fixed `ens4` | no | `ens4` | `ens4` | NIC used for the private path between nodes (portal interface2). Skipped when it does not exist. |
-| `K3S_LOCAL_ADDR` | fixed (derived) | no | `10.250.<3rd>.<4th>/16` from the node's public IP | `10.250.0.11/24` | Static private address on that NIC. By default derived from the public IP (public `87.237.190.3` gives `10.250.190.3/16`), so nodes do not collide. k3s uses it as `node-ip`, so cluster traffic (flannel, etcd, the API for joining nodes) stays on it; join with `K3S_SERVER_URL=https://<first node's private address>:6443`. `none` turns the private path off. |
 | `MACSEC_IFACE` | no | no | empty (no MACsec) | `ens7` | Host NIC for MACsec. |
 | `MACSEC_ADDR` | no | no | empty (no address) | `10.99.0.1/24` | CIDR on the macsec interface. |
+| `K3S_PRIVATE_IFACE` | fixed `ens4` | no | `ens4` | `ens4` | NIC used for the private path between nodes (portal interface2). Skipped when it does not exist. |
+| `K3S_LOCAL_ADDR` | fixed (derived) | no | `10.250.<3rd>.<4th>/16` from the node's public IP | `10.250.0.11/24` | Static private address on that NIC. By default derived from the public IP (public `87.237.190.3` gives `10.250.190.3/16`), so nodes do not collide. k3s uses it as `node-ip`, so cluster traffic (flannel, etcd, the API for joining nodes) stays on it; join with `K3S_SERVER_URL=https://<first node's private address>:6443`. `none` turns the private path off. |
 | `K3S_ROLE` | no | no | `single` | `single` | `single`: standalone node. `server`: control-plane node; without `K3S_SERVER_URL` it starts a cluster, with it it joins one (the first node must be a `server`, not `single`). `agent`: worker node that joins a cluster. The encryptor is installed on a `single` node or the first `server` only. |
 | `K3S_SERVER_URL` | no | no | empty | `https://10.250.190.3:6443` | Required for an `agent` and for a `server` joining a cluster: the API address of an existing server, such as its private address on port 6443. Empty for `single` or the first `server`. |
 | `K3S_TOKEN` | no | no | empty | `4f9c2a7e1b8d3c6a5e0f9b2d7c4a1e83` | Secret of the k3s cluster, required wherever `K3S_SERVER_URL` is set. Choose a plain value (for example `openssl rand -hex 24`) and set it on the first `server` too; empty there means k3s generates one. |
 | `K3S_TLS_SAN` | no | no | empty | `172.16.0.11` | Extra name or IP in the k3s API server certificate, for `kubectl` or agents reaching port 6443 from outside. Not needed for local `sudo k3s kubectl`. |
-| `ADMIN_PASSWORD` | no | no | generated | `ChangeMe-2026` | Master only. Console password. Written to `/etc/encryptor/credentials.env` (root only). |
 
 BASIC uses plain HTTP for the KME and the peer API. ADVANCED does too when `KME_URL` is `http://`. Its simulator gives random keys, **not QKD**, with no authentication.
 
